@@ -7,6 +7,10 @@ A portfolio tracker for MapleStory Classic World cash items: what you hold, what
 - `scripts/refresh-prices.mjs` refreshes prices from a public tracker on a schedule (`.github/workflows/prices.yml`) and writes `data/refresh-log.json` so each run can be checked.
 - Prices marked with a `t` field were read by hand from Cozy Market and are kept for 18 hours before the tracker may replace them.
 
+## Market rules
+
+`market.js` gives every crate item a plan when no hand-set plan exists in the catalog. It uses the crate's end date, about a week of price change, the price most commons in that crate sit at, and listing counts. The same data drives the portfolio value chart and the Good buys page (`#buys`). Hand-set plans in `data/catalog.json` always win, and automatic signals are labelled as automatic.
+
 ## Inventory scanner
 
 `scan-core.js` and `scan.js` read a shared MapleStory window (or uploaded screenshots) in the browser. Nothing is uploaded.

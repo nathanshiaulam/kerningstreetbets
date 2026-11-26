@@ -179,6 +179,20 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
 .msg{font-size:13px;color:var(--ink2);min-height:1.2em}
 .sold{display:flex;flex-direction:column;font-size:14px}
 .sold div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:6px 0;font-variant-numeric:tabular-nums}
+.buys-only{display:none}
+.view-buys .buys-only{display:flex;flex-direction:column;gap:30px}
+.view-buys .pf-only{display:none!important}
+.buys-body{display:flex;flex-direction:column;gap:30px}
+.buy-list{display:flex;flex-direction:column}
+.buy{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;padding:10px 0;border-top:1px solid var(--line)}
+.buy .nm span{font-size:13px;line-height:1.45;max-width:72ch}
+.buy .num b{font-family:var(--display);font-size:26px;line-height:1;font-weight:800;letter-spacing:.01em}
+.nav{display:flex;gap:0;border:2px solid #000;box-shadow:2px 3px 0 rgba(0,0,0,.45)}
+.nav a{font-size:13px;font-weight:700;color:#f1efe8;background:#17181c;padding:3px 12px;text-decoration:none}
+.nav a[aria-current="page"]{background:#ffd21f;color:#17181c}
+.pf-chart{display:flex;flex-direction:column;gap:8px}
+.pf-chart .chart svg{max-height:220px}
+.auto{margin-top:6px;font-size:12px;color:var(--ink2)}
 .foot{font-size:12px;color:#e9e6dc;background:rgba(17,17,20,.86);border:2px solid #000;padding:10px 14px;max-width:80ch}
 @media (prefers-reduced-motion:no-preference){.dot.live{animation:pulse 2.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.45}}}
 </style>
@@ -188,12 +202,13 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
   <header class="top">
     <div class="brand">Kerning Street Bets<span>MapleStory Classic NX desk</span></div>
     <div class="top-right">
+      <nav class="nav" aria-label="Pages"><a href="#portfolio" id="navPf">Portfolio</a><a href="#buys" id="navBuys">Good buys</a></nav>
       <div class="status"><i class="dot" id="liveDot"></i><span id="statusText">Loading prices…</span></div>
       <button class="btn pri" id="scanTop">Scan inventory</button>
     </div>
   </header>
 
-  <section class="panel hero" aria-label="Portfolio summary">
+  <section class="panel hero pf-only" aria-label="Portfolio summary">
     <div class="hero-row">
       <div>
         <div class="eyebrow">Sellable items at latest prices</div>
@@ -206,6 +221,10 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
         <div class="stat"><span class="eyebrow">Items</span><b id="count">—</b></div>
       </div>
     </div>
+    <div class="pf-chart">
+      <div class="chips" id="pfRange" role="group" aria-label="Chart range"></div>
+      <div id="pfChart"></div>
+    </div>
     <div>
       <div class="planbar" id="planbar" role="group" aria-label="Value by plan"></div>
     </div>
@@ -213,7 +232,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
     <div class="advice" id="advice"></div>
   </section>
 
-  <section class="panel card" id="scanPanel" aria-label="Inventory scan" hidden>
+  <section class="panel card pf-only" id="scanPanel" aria-label="Inventory scan" hidden>
     <div class="scan-head">
       <h3>Inventory scan</h3>
       <div class="line">
@@ -249,7 +268,15 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
     </div>
   </section>
 
-  <div class="grid">
+  <div class="buys-only" id="buys">
+    <section class="panel card">
+      <h3>Good buys</h3>
+      <p>Crate items the market may be underpricing, found by five screens over today's prices, each crate's end date, a week of price change, and how many listings exist. They are rules of thumb from how earlier crates behaved, not predictions. Check the item in game before you spend.</p>
+    </section>
+    <div id="buysBody" class="buys-body"></div>
+  </div>
+
+  <div class="grid pf-only">
     <section class="panel" aria-label="Holdings">
       <div class="list-head">
         <div class="chips" id="chips" role="group" aria-label="Filter holdings"></div>
@@ -259,7 +286,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
     <aside class="panel detail" id="detail" aria-label="Item detail"></aside>
   </div>
 
-  <div class="two">
+  <div class="two pf-only">
     <section class="panel card" aria-label="Scan and backup">
       <h3>Scan inventory</h3>
       <p>Share your MapleStory window, scroll through the Deco tab once, then hover each different item. Only unworn items (red badge) are counted. The picture is read in this browser and is never uploaded.</p>
@@ -293,9 +320,12 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
   <p class="foot" id="foot">Prices are Cozy Market usual prices where marked and tracker sale medians otherwise, so the price in a shop right now can differ. Signals follow the levels and dates saved for each item. Check the in-game price before you list. Not affiliated with Nexon or Cozy Market.</p>
 </div>
 
+<script src="market.js"></script>
 <script>
 "use strict";
 /* ---------- state ---------- */
+let crates = {};                  // crate label -> {name,start,end}
+let pfRange = 30;
 let catalog = {};                 // slug -> {n,c,r,f,e,plan,buy,sell,sellFrom,reviewBy,floor,note}
 let prices = { asOf: null, items: {} }; // slug -> {p,s,h:[[date,price],...]}
 let pf = { mesos: 0, holdings: [], sold: [], my: {} };
@@ -367,14 +397,15 @@ function signalFor(c, p, today, named) {
   return { key: "any", label: "Sell anytime", why: c.note || "Common item: liquid, with little to gain from waiting." };
 }
 function view(h) {
-  const c = h.slug ? catalog[h.slug] : null;
   const pr = h.slug ? prices.items[h.slug] : null;
+  const c = h.slug ? KSBMarket.planFor(catalog[h.slug] || null, pr, todayStr()) : null;
   const hist = parseHist(pr && pr.h);
   let p = pr && pr.p != null ? pr.p : (hist.length ? hist[hist.length - 1][1] : null);
   let prev = hist.length > 1 ? hist[hist.length - 2][1] : null, mine = false;
   const my = h.slug && pf.my ? pf.my[h.slug] : null;
   if (my && my.p && (!prices.asOf || my.at > prices.asOf)) { prev = p; p = my.p; mine = true; }
   const sig = signalFor(c, p, todayStr(), !!h.slug);
+  if (c && c.auto && sig.key !== "name") sig.auto = true;
   return { h, c, pr, hist, p, prev, mine, sig, val: p != null ? p * h.qty : null, day: p != null && prev ? p / prev - 1 : null, peak: hist.length ? Math.max(p || 0, ...hist.map((x) => x[1])) : p };
 }
 
@@ -419,6 +450,14 @@ function render() {
   $("#count").textContent = units + (need ? " · " + need + " unpriced" : "");
   if (document.activeElement !== $("#mesos")) $("#mesos").value = full(pf.mesos || 0);
 
+  const rg = $("#pfRange"); rg.replaceChildren();
+  for (const [d, label] of [[7, "1 week"], [30, "1 month"], [0, "All"]]) rg.append(el("button", { class: "chip", "aria-pressed": String(pfRange === d), text: label, onclick: () => { pfRange = d; render(); } }));
+  const series = priced.length ? KSBMarket.portfolioSeries(priced, pfRange) : [];
+  const pc = $("#pfChart"); pc.replaceChildren();
+  if (series.length >= 2) pc.append(chart({ hist: series, h: { name: "your portfolio" } }, "Value of the items you hold now"), el("div", { class: "msg", text: "What the items you hold today were worth on each day. Days before an item's first saved price use that first price." }));
+  else if (priced.length) pc.append(el("div", { class: "msg", text: "The value chart appears once there are two days of prices." }));
+  KSBMarket.renderBuys();
+
   const bar = $("#planbar"), leg = $("#legend"); bar.replaceChildren(); leg.replaceChildren();
   for (const b of BUCKETS) {
     const share = total ? sums[b.key] / total : 0;
@@ -428,7 +467,7 @@ function render() {
   if (!total) bar.append(el("button", { style: "flex:1;background:var(--line)", "aria-label": "No priced holdings", disabled: true }));
   const adv = $("#advice"); adv.replaceChildren();
   if (pf.holdings.length) {
-    adv.append("For gear money today, list the ", el("b", { text: "Sell now" }), " and ", el("b", { text: "Sell anytime" }), " items first: about ", el("b", { text: full(sums.sell + sums.any) + " mesos" }), " at these prices. Leave the ", el("b", { text: "Sell at crate end" }), " items until Dec 1 to Dec 3, and hold the keepers through their review date." + (need ? " " + need + " items still need a name or a price before they count." : ""));
+    adv.append("For gear money today, list the ", el("b", { text: "Sell now" }), " and ", el("b", { text: "Sell anytime" }), " items first: about ", el("b", { text: full(sums.sell + sums.any) + " mesos" }), " at these prices. Leave the ", el("b", { text: "Sell at crate end" }), " items until their crate's last days, and hold the keepers through their review date." + (need ? " " + need + " items still need a name or a price before they count." : ""));
   }
 
   const chips = $("#chips"); chips.replaceChildren();
@@ -467,13 +506,13 @@ function spark(hist) {
   const e = pt(hist.length - 1); s.append(sv("circle", { cx: e[0], cy: e[1], r: 2.5, fill: "var(--s1)" }));
   return s;
 }
-function chart(v) {
+function chart(v, what) {
   const hist = v.hist, box = el("div", { class: "chart" });
   if (hist.length < 2) { box.append(el("div", { class: "msg", text: hist.length ? "One day of price data so far. The line fills in as prices refresh." : "No price history yet." })); return box; }
   const W = 560, H = 200, L = 46, R = 14, T = 12, B = 24;
   const ys = hist.map((x) => x[1]), lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo || hi * 0.1 || 1) * 0.12, y0 = lo - pad, y1 = hi + pad;
   const X = (i) => L + (i / (hist.length - 1)) * (W - L - R), Y = (p) => T + (1 - (p - y0) / (y1 - y0)) * (H - T - B);
-  const s = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", tabindex: "0", "aria-label": "Price history for " + v.h.name + ", " + hist.length + " days, from " + full(ys[0]) + " to " + full(ys[ys.length - 1]) + " mesos. Use the arrow keys to read each day." });
+  const s = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", tabindex: "0", "aria-label": (what || "Price history for " + v.h.name) + ", " + hist.length + " days, from " + full(ys[0]) + " to " + full(ys[ys.length - 1]) + " mesos. Use the arrow keys to read each day." });
   for (const val of [lo, (lo + hi) / 2, hi]) {
     s.append(sv("line", { x1: L, x2: W - R, y1: Y(val), y2: Y(val), stroke: "var(--line)", "stroke-width": 1 }));
     const t = sv("text", { x: L - 8, y: Y(val) + 4, "text-anchor": "end", fill: "var(--ink2)", "font-size": 11 }); t.textContent = kfmt(val); s.append(t);
@@ -504,7 +543,7 @@ function renderDetail(v) {
     d.append(chart(v));
     if (v.hist.length > 1) d.append(el("details", { class: "tbl" }, el("summary", { text: "Show prices as a table" }), el("table", null, ...v.hist.slice().reverse().map((x) => el("tr", null, el("td", { text: shortDate(x[0]) }), el("td", { text: full(x[1]) }))))));
   }
-  if (v.sig.why || h.desc) d.append(el("div", { class: "why" }, el("b", { text: v.sig.label }), v.sig.why || "", h.desc ? el("div", { style: "margin-top:4px;color:var(--ink2)", text: "From your screenshot: " + h.desc }) : null));
+  if (v.sig.why || h.desc) d.append(el("div", { class: "why" }, el("b", { text: v.sig.label }), v.sig.why || "", v.sig.auto ? el("div", { class: "auto", text: "Automatic signal from crate dates and price history, not a hand-checked call." }) : null, h.desc ? el("div", { style: "margin-top:4px;color:var(--ink2)", text: "From your screenshot: " + h.desc }) : null));
   const kv = el("div", { class: "kv" });
   const add = (k, val) => { if (val != null && val !== "") kv.append(el("div", null, el("span", { text: k }), el("b", { text: val }))); };
   add("You hold", "×" + h.qty + (v.val != null ? " · " + full(v.val) : ""));
@@ -573,10 +612,17 @@ async function loadData(first) {
   try {
     const get = (u) => fetch(u, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(u); return r.json(); });
     const [c, p] = await Promise.all([get("data/catalog.json"), get("data/prices.json")]);
-    catalog = c.items || {}; prices = { asOf: p.asOf || null, items: p.items || {} };
+    catalog = c.items || {}; crates = c.crates || {}; prices = { asOf: p.asOf || null, items: p.items || {} };
     priceStatus(); render();
   } catch (e) { if (first) setStatus("Couldn't load the price files. Reload to try again.", false); }
 }
+function route() {
+  const buys = location.hash === "#buys";
+  document.body.classList.toggle("view-buys", buys);
+  $("#navPf").setAttribute("aria-current", buys ? "false" : "page"); $("#navBuys").setAttribute("aria-current", buys ? "page" : "false");
+  if (buys) window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route); route();
 gotData = true;
 try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) pf = normal(saved); } catch (e) {}
 render();

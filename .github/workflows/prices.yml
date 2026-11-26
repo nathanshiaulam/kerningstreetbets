@@ -9,20 +9,26 @@ on:
       - ".github/workflows/prices.yml"
 permissions:
   contents: write
-concurrency: prices
+concurrency:
+  group: prices
+  cancel-in-progress: false
 jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: node scripts/refresh-prices.mjs
-        continue-on-error: true
-      - name: Commit if prices changed
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Fetch prices
+        run: |
+          node --version
+          out=$(node scripts/refresh-prices.mjs 2>&1) || echo "::warning title=Price script::${out//$'\n'/ }"
+          echo "$out"
+      - name: Commit and push
         run: |
           git config user.name "price-refresh"
           git config user.email "actions@users.noreply.github.com"
-          git add data/prices.json data/catalog.json data/refresh-log.json
-          git diff --cached --quiet || (git commit -m "Refresh prices" && git pull --rebase && git push)
+          git add -A data
+          if git diff --cached --quiet; then echo "::notice title=Prices::Nothing changed"; exit 0; fi
+          out=$(git commit -m "Refresh prices" 2>&1) || { echo "::error title=Commit failed::${out//$'\n'/ }"; exit 1; }
+          out=$(git push 2>&1) || out=$(git pull --rebase 2>&1 && git push 2>&1) || { echo "::error title=Push failed::${out//$'\n'/ }"; exit 1; }
+          echo "::notice title=Prices::Committed a refresh"

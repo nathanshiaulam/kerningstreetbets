@@ -1,55 +1,74 @@
-// Refreshes data/prices.json from maplestory-classic.com item pages.
-// Runs in GitHub Actions. Writes data/refresh-log.json so each run's parsing can be checked.
+// Refreshes data/prices.json from the tracker's public market.json (one request for every item).
+// Runs in GitHub Actions. Writes data/refresh-log.json so each run can be checked.
+// A price read by hand from Cozy Market (field t) is kept for 18 hours before the tracker may replace it;
+// the tracker still supplies the daily history and seller counts for those items.
 import fs from "node:fs";
 
 const PRICES = "data/prices.json", CATALOG = "data/catalog.json", LOG = "data/refresh-log.json";
 const prices = JSON.parse(fs.readFileSync(PRICES, "utf8"));
 const catalog = JSON.parse(fs.readFileSync(CATALOG, "utf8"));
-const slugs = [...new Set([...Object.keys(prices.items), ...Object.keys(catalog.items).filter((s) => catalog.items[s].plan)])];
-const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
-const num = (s) => +String(s).replace(/,/g, "");
-const tag = (y, m, d) => String(y).slice(2) + String(m).padStart(2, "0") + String(d).padStart(2, "0");
-const now = new Date(), todayTag = tag(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate());
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const HOLD_MS = 18 * 3600e3; // a hand-read Cozy price (field t) is kept this long before the tracker may replace it
-const log = { ranAt: now.toISOString(), items: {}, changed: 0, kept: 0, failed: 0 };
+const now = new Date(), HOLD_MS = 18 * 3600e3;
+const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const log = { ranAt: now.toISOString(), ok: false };
 
-for (const slug of slugs) {
-  const note = (log.items[slug] = {});
-  try {
-    const res = await fetch("https://maplestory-classic.com/market/" + slug, { headers: { "user-agent": "kerningstreetbets price refresh (+https://github.com/nathanshiaulam/kerningstreetbets)" } });
-    note.status = res.status;
-    if (!res.ok) { log.failed++; continue; }
-    const html = await res.text();
-    const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ");
-    // daily rows such as "Nov 26, 2026 276,389 20" or "November 26, 2026 276,389 20"
-    const rows = [];
-    for (const m of text.matchAll(/\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}), (\d{4}) ([\d,]{3,}) (\d{1,5})\b/g)) {
-      const mo = MONTHS[m[1].toLowerCase()], p = num(m[4]);
-      if (mo && p >= 100) rows.push([tag(+m[3], mo, +m[2]), p]);
-    }
-    const head = /sells for about ([\d,]+) mesos/i.exec(text) || /about ([\d,]+) mesos/i.exec(html);
-    const sellers = /([\d,]+) players (?:are )?selling/i.exec(text);
-    note.rows = rows.length; note.head = head ? num(head[1]) : null;
-    rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
-    const p = rows.length ? rows[rows.length - 1][1] : head ? num(head[1]) : null;
-    if (p == null) { log.failed++; note.why = "no price found"; continue; }
-    const e = prices.items[slug] || (prices.items[slug] = {});
-    if (e.p && (p > e.p * 10 || p < e.p / 10)) { log.failed++; note.why = "implausible " + p + " vs " + e.p; continue; }
-    if (sellers) e.s = num(sellers[1]);
-    const pts = new Map((e.h || "").split(" ").filter(Boolean).map((x) => x.split(":")));
-    const held = e.t && now - new Date(e.t) < HOLD_MS, heldTag = held ? tag(...e.t.slice(0, 10).split("-").map(Number)) : null;
-    for (const [d, v] of rows.length ? rows : [[todayTag, p]]) if (!held || d < heldTag || !pts.has(d)) pts.set(d, String(v));
-    e.h = [...pts.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-30).map((x) => x.join(":")).join(" ");
-    if (held) { log.kept++; note.kept = true; continue; }
-    delete e.t;
-    if (e.p !== p) { log.changed++; e.p = p; }
-    note.p = p;
-  } catch (err) { log.failed++; note.why = String(err).slice(0, 120); }
-  await sleep(700);
+// history dates may be ISO strings, YYMMDD/YYYYMMDD strings, or epoch seconds/milliseconds
+function tag(d) {
+  if (typeof d === "number") { const t = new Date(d > 1e11 ? d : d * 1000); return isNaN(t) ? null : String(t.getUTCFullYear()).slice(2) + String(t.getUTCMonth() + 1).padStart(2, "0") + String(t.getUTCDate()).padStart(2, "0"); }
+  const s = String(d), m = /^(\d{4})-(\d\d)-(\d\d)/.exec(s) || /^(\d{4})(\d\d)(\d\d)$/.exec(s);
+  if (m) return m[1].slice(2) + m[2] + m[3];
+  return /^\d{6}$/.test(s) ? s : null;
 }
 
-if (log.changed) { prices.asOf = now.toISOString(); }
-fs.writeFileSync(PRICES, JSON.stringify(prices));
+try {
+  const res = await fetch("https://maplestory-classic.com/market.json", { headers: { "user-agent": "kerningstreetbets price refresh (+https://github.com/nathanshiaulam/kerningstreetbets)" } });
+  log.status = res.status;
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const data = await res.json();
+  const items = Array.isArray(data.items) ? data.items : [];
+  log.updatedAt = data.updatedAt; log.total = items.length;
+  log.categories = {}; for (const it of items) log.categories[it.k] = (log.categories[it.k] || 0) + 1;
+  log.sample = items.filter((it) => /tania cloak|angel halo/i.test(it.n)).slice(0, 2).map((it) => Object.assign({}, it, { h: (it.h || []).slice(-3) }));
+  const byName = new Map(), bySlug = new Map();
+  for (const it of items) { byName.set(norm(it.n), it); bySlug.set(it.s, it); }
+
+  // cash items the tracker knows that the catalog does not: add them without a crate so they get a price
+  const known = new Set(Object.values(catalog.items).map((c) => norm(c.n)));
+  log.added = 0;
+  for (const it of items) {
+    if (!/cash|cosmetic/i.test(String(it.k)) || known.has(norm(it.n)) || !it.n) continue;
+    const slug = catalog.items[it.s] ? slugify(it.n) + "-2" : it.s || slugify(it.n);
+    if (catalog.items[slug]) continue;
+    catalog.items[slug] = { n: it.n }; known.add(norm(it.n)); log.added++;
+  }
+
+  log.matched = 0; log.changed = 0; log.kept = 0; log.unmatched = [];
+  for (const [slug, c] of Object.entries(catalog.items)) {
+    const it = bySlug.get(slug) || byName.get(norm(c.n));
+    if (!it || !(it.p > 0)) { if (log.unmatched.length < 60) log.unmatched.push(c.n); continue; }
+    log.matched++;
+    const e = prices.items[slug] || (prices.items[slug] = {});
+    if (e.p && (it.p > e.p * 20 || it.p < e.p / 20)) { log.implausible = (log.implausible || []).concat([[c.n, e.p, it.p]]).slice(0, 20); continue; }
+    if (it.sellers != null) e.s = it.sellers;
+    const held = e.t && now - new Date(e.t) < HOLD_MS, heldTag = held ? tag(e.t) : null;
+    const pts = new Map((e.h || "").split(" ").filter(Boolean).map((x) => x.split(":")));
+    for (const row of it.h || []) {
+      const d = tag(Array.isArray(row) ? row[0] : row && row.d), v = Array.isArray(row) ? row[1] : row && row.p;
+      if (!d || !(v > 0)) continue;
+      if (held && d >= heldTag && pts.has(d)) continue;      // keep the Cozy reading for its own day
+      pts.set(d, String(Math.round(v)));
+    }
+    e.h = [...pts.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-45).map((x) => x.join(":")).join(" ");
+    if (held) { log.kept++; continue; }
+    delete e.t;
+    if (e.p !== it.p) { e.p = it.p; log.changed++; }
+  }
+  if (log.changed || log.added) prices.asOf = now.toISOString();
+  prices.tracker = { updatedAt: data.updatedAt, ranAt: now.toISOString() };
+  fs.writeFileSync(PRICES, JSON.stringify(prices));
+  fs.writeFileSync(CATALOG, JSON.stringify(catalog));
+  log.ok = true;
+} catch (err) { log.error = String(err).slice(0, 300); }
 fs.writeFileSync(LOG, JSON.stringify(log, null, 1));
-console.log(`changed ${log.changed}, kept ${log.kept}, failed ${log.failed} of ${slugs.length}`);
+console.log(JSON.stringify(Object.assign({}, log, { sample: undefined, unmatched: (log.unmatched || []).length })));
+if (!log.ok) process.exit(1);

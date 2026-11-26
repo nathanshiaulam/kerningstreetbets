@@ -16,7 +16,7 @@ A portfolio tracker for MapleStory Classic World cash items: what you hold, what
 - Quantities come from the map, not from hovers, so hovering an item twice, or hovering its second copy, changes nothing. Only unworn items (red badge) are counted.
 - Synced rows keep their icon, and that icon names the same item on the next scan without a hover.
 
-`fonts/` holds Alfa Slab One, Figtree and Pixelify Sans (SIL Open Font License 1.1), served with the site. The wood and parchment look is drawn in CSS; the site uses no game artwork.
+`fonts/` holds Sedgwick Ave Display, Big Shoulders Stencil and Figtree (SIL Open Font License 1.1), served with the site. The brick wall, taped bills and stickers are drawn in CSS; the site uses no game artwork.
 
 `vendor/tesseract/` holds Tesseract.js 7.0.0, its LSTM WebAssembly cores and the English model, all Apache-2.0 (licences alongside).
 

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kerning Street Bets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=Pixelify+Sans:wght@500&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: a trading desk. One big sellable-value number, a plan bar that splits it
+   into what to sell and what to keep, then a holdings list beside a sticky detail pane. */
+:root{
+  color-scheme: light;
+  --bg:#eef1f4; --panel:#ffffff; --wash:#f3f5f8; --ink:#14181f; --ink2:#5b6472; --line:#dde2e8;
+  --accent:#3d3ad6; --accent-ink:#ffffff;
+  --s1:#257de0; --s2:#f47230; --s3:#00b894; --s4:#f2a600;
+  --up:#006c10; --down:#c22f30;
+  --display:"Bricolage Grotesque","Figtree",system-ui,sans-serif;
+  --body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --pixel:"Pixelify Sans","Figtree",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0e1014; --panel:#191919; --wash:#22252b; --ink:#eef0f3; --ink2:#9aa3b0; --line:#2d3138;
+    --accent:#9a97ff; --accent-ink:#0e1014;
+    --s1:#338ced; --s2:#e76624; --s3:#00a888; --s4:#d28e05;
+    --up:#0aac23; --down:#eb6263;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0e1014; --panel:#191919; --wash:#22252b; --ink:#eef0f3; --ink2:#9aa3b0; --line:#2d3138;
+  --accent:#9a97ff; --accent-ink:#0e1014;
+  --s1:#338ced; --s2:#e76624; --s3:#00a888; --s4:#d28e05;
+  --up:#0aac23; --down:#eb6263;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 56px;display:flex;flex-direction:column;gap:16px}
+.top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:800;font-size:20px;letter-spacing:-.01em}
+.brand span{font-family:var(--pixel);font-weight:500;font-size:12px;color:var(--ink2);margin-left:8px;letter-spacing:.04em}
+.status{font-size:13px;color:var(--ink2);display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ink2);flex:none}
+.dot.live{background:var(--up)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.eyebrow{font-family:var(--pixel);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+.hero{padding:22px 22px 18px;display:flex;flex-direction:column;gap:18px}
+.hero-row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end;justify-content:space-between}
+.big{font-family:var(--display);font-weight:800;font-size:clamp(38px,7vw,64px);line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.big small{font-size:.32em;font-weight:500;color:var(--ink2);letter-spacing:0;margin-left:8px}
+.delta{font-weight:600;font-variant-numeric:tabular-nums}
+.delta.up{color:var(--up)} .delta.down{color:var(--down)} .delta.flat{color:var(--ink2)}
+.side-stats{display:flex;gap:24px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:2px;min-width:120px}
+.stat b{font-family:var(--display);font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat input{font-family:var(--display);font-size:22px;font-weight:700;width:150px;border:0;border-bottom:1px dashed var(--line);background:transparent;padding:0;font-variant-numeric:tabular-nums}
+.planbar{display:flex;gap:2px;height:18px;border-radius:4px;overflow:hidden}
+.planbar button{border:0;padding:0;min-width:4px;cursor:pointer;border-radius:0}
+.planbar button:first-child{border-radius:4px 0 0 4px}.planbar button:last-child{border-radius:0 4px 4px 0}
+.planbar button:hover,.planbar button:focus-visible{filter:brightness(1.12)}
+.legend{display:flex;gap:10px 22px;flex-wrap:wrap}
+.legend button{border:0;background:none;padding:2px 0;cursor:pointer;display:flex;align-items:baseline;gap:8px;text-align:left}
+.sw{width:10px;height:10px;border-radius:2px;flex:none;align-self:center}
+.legend b{font-variant-numeric:tabular-nums}
+.legend span{color:var(--ink2);font-size:13px}
+.advice{font-size:14px;color:var(--ink2);max-width:70ch}
+.advice b{color:var(--ink)}
+.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+.list-head{padding:14px 16px 10px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--line)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.rows{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 84px 84px minmax(104px,auto);gap:10px;align-items:center;padding:10px 16px;border:0;border-bottom:1px solid var(--line);background:transparent;text-align:left;cursor:pointer;width:100%}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--wash)}
+.row[aria-current="true"]{background:var(--wash);box-shadow:inset 3px 0 0 var(--accent)}
+.nm{min-width:0;display:flex;flex-direction:column;gap:2px}
+.nm b{font-weight:600;overflow-wrap:anywhere}
+.nm span{font-size:12px;color:var(--ink2)}
+.tag{font-family:var(--pixel);font-size:11px;letter-spacing:.03em;border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-right:6px;color:var(--ink2);white-space:nowrap}
+.tag.warn{border-color:var(--s4);color:var(--ink)}
+.num{text-align:right;font-variant-numeric:tabular-nums;display:flex;flex-direction:column;gap:1px}
+.num b{font-weight:600}.num span{font-size:12px}
+.pill{justify-self:end;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill i{width:8px;height:8px;border-radius:50%;flex:none}
+@media (max-width:560px){.row{grid-template-columns:minmax(0,1fr) 72px minmax(96px,auto)}.row .spark{display:none}}
+.empty{padding:28px 16px;color:var(--ink2);text-align:center}
+.detail{position:sticky;top:12px;padding:18px;display:flex;flex-direction:column;gap:14px}
+@media (max-width:860px){.detail{position:static}}
+.detail h2{font-family:var(--display);font-size:24px;font-weight:700;margin:0;letter-spacing:-.01em;text-wrap:balance;overflow-wrap:anywhere}
+.price-line{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.price-line b{font-family:var(--display);font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--panel);border-radius:8px;padding:5px 9px;font-size:12px;transform:translate(-50%,-110%);white-space:nowrap;display:none;z-index:5}
+.tip b{display:block;font-size:14px;font-variant-numeric:tabular-nums}
+.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+.kv div{display:flex;flex-direction:column;border-top:1px solid var(--line);padding-top:6px}
+.kv span{font-size:12px;color:var(--ink2)} .kv b{font-variant-numeric:tabular-nums;font-weight:600}
+.why{background:var(--wash);border-radius:10px;padding:10px 12px;font-size:14px}
+.why b{display:block;margin-bottom:2px}
+.acts{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px}
+.line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.line label{font-size:13px;color:var(--ink2);min-width:74px}
+.in{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 10px;min-width:0}
+.in.sm{width:110px}.in.xs{width:64px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;font-weight:600;cursor:pointer}
+.btn:hover{background:var(--wash)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{filter:brightness(1.08);background:var(--accent)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{border-color:transparent;color:var(--ink2);font-weight:500}
+details.tbl summary{cursor:pointer;font-size:13px;color:var(--ink2)}
+details.tbl table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px;font-variant-numeric:tabular-nums}
+details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:last-child{text-align:right}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:860px){.two{grid-template-columns:minmax(0,1fr)}}
+.card{padding:18px;display:flex;flex-direction:column;gap:12px}
+.card h3{font-family:var(--display);font-size:18px;font-weight:700;margin:0}
+.card p{margin:0;color:var(--ink2);font-size:14px;max-width:65ch}
+.drop{border:1.5px dashed var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.drop.over{border-color:var(--accent);background:var(--wash)}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap}
+.thumbs img{height:72px;width:auto;border-radius:6px;border:1px solid var(--line);image-rendering:pixelated}
+.scan{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto;border-top:1px solid var(--line);padding-top:10px}
+.scan .srow{display:grid;grid-template-columns:20px minmax(0,1fr) 56px;gap:8px;align-items:center}
+.scan small{grid-column:2 / -1;color:var(--ink2);font-size:12px;margin-top:-4px}
+.msg{font-size:13px;color:var(--ink2);min-height:1.2em}
+.sold{display:flex;flex-direction:column;font-size:14px}
+.sold div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:6px 0;font-variant-numeric:tabular-nums}
+.foot{font-size:12px;color:var(--ink2);max-width:80ch}
+@media (prefers-reduced-motion:no-preference){.dot.live{animation:pulse 2.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.35}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">Kerning Street Bets<span>MAPLESTORY CLASSIC NX DESK</span></div>
+    <div class="status"><i class="dot" id="liveDot"></i><span id="statusText">Loading prices…</span></div>
+  </header>
+
+  <section class="panel hero" aria-label="Portfolio summary">
+    <div class="hero-row">
+      <div>
+        <div class="eyebrow">Sellable items at latest prices</div>
+        <div class="big" id="total">—<small>mesos</small></div>
+        <div class="delta flat" id="totalDelta">&nbsp;</div>
+      </div>
+      <div class="side-stats">
+        <div class="stat"><span class="eyebrow">Mesos on hand</span><input id="mesos" inputmode="numeric" aria-label="Mesos on hand" value=""></div>
+        <div class="stat"><span class="eyebrow">Raise now</span><b id="raise">—</b></div>
+        <div class="stat"><span class="eyebrow">Items</span><b id="count">—</b></div>
+      </div>
+    </div>
+    <div>
+      <div class="planbar" id="planbar" role="group" aria-label="Value by plan"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="advice" id="advice"></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel" aria-label="Holdings">
+      <div class="list-head">
+        <div class="chips" id="chips" role="group" aria-label="Filter holdings"></div>
+      </div>
+      <div class="rows" id="rows"></div>
+    </section>
+    <aside class="panel detail" id="detail" aria-label="Item detail"></aside>
+  </div>
+
+  <div class="two">
+    <section class="panel card" aria-label="Scan and backup">
+      <h3>Scan inventory</h3>
+      <p>Next build: share your MapleStory window, hover your items, and the portfolio syncs to what is in your inventory. Until then, import a portfolio file or add items by name.</p>
+      <div class="line"><button class="btn pri" id="scanBtn" disabled>Share MapleStory window</button></div>
+      <h3 style="margin-top:8px">Back up and move</h3>
+      <p>Your portfolio is saved in this browser only. Export it to keep a copy or move it to another device.</p>
+      <div class="line">
+        <button class="btn" id="exportBtn">Export file</button>
+        <label class="btn" for="importFile" style="cursor:pointer">Import file</label>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+        <button class="btn" id="copyBtn">Copy list for Claude</button>
+      </div>
+      <div class="msg" id="ioMsg" role="status"></div>
+    </section>
+    <section class="panel card" aria-label="Add by name and sales">
+      <h3>Add by name</h3>
+      <div class="line">
+        <input class="in" id="addName" list="names" placeholder="Item name" aria-label="Item name" style="flex:1">
+        <input class="in xs" id="addQty" type="number" min="1" value="1" aria-label="Quantity">
+        <button class="btn" id="addBtn">Add</button>
+      </div>
+      <datalist id="names"></datalist>
+      <h3 style="margin-top:8px">Sold so far</h3>
+      <div class="sold" id="sold"></div>
+    </section>
+  </div>
+  <p class="foot" id="foot">Prices are Cozy Market usual prices where marked and tracker sale medians otherwise, so the price in a shop right now can differ. Signals follow the levels and dates saved for each item. Check the in-game price before you list. Not affiliated with Nexon or Cozy Market.</p>
+</div>
+
+<script>
+"use strict";
+/* ---------- state ---------- */
+let catalog = {};                 // slug -> {n,c,r,f,e,plan,buy,sell,sellFrom,reviewBy,floor,note}
+let prices = { asOf: null, items: {} }; // slug -> {p,s,h:[[date,price],...]}
+let pf = { mesos: 0, holdings: [], sold: [], my: {} };
+let sel = null, filter = "all", gotData = false;
+
+const BUCKETS = [
+  { key: "keep",  label: "Keep",              color: "var(--s1)" },
+  { key: "sell",  label: "Sell now",          color: "var(--s2)" },
+  { key: "later", label: "Sell at crate end", color: "var(--s3)" },
+  { key: "any",   label: "Sell anytime",      color: "var(--s4)" },
+];
+const FILTERS = [["all","All"],["sell","Sell now"],["any","Sell anytime"],["later","Sell at crate end"],["keep","Keep"],["name","Needs a name or price"]];
+
+/* ---------- helpers ---------- */
+const $ = (s) => document.querySelector(s);
+function el(tag, props, ...kids) {
+  const n = document.createElement(tag);
+  if (props) for (const k in props) {
+    const v = props[k];
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (k === "style") n.style.cssText = v;
+    else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) n.append(c);
+  return n;
+}
+function sv(tag, attrs) {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+const full = (n) => n == null ? "—" : Math.round(n).toLocaleString("en-US");
+function kfmt(n) {
+  if (n == null) return "—";
+  const a = Math.abs(n);
+  if (a >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "m";
+  if (a >= 1e3) return Math.round(n / 1e3) + "k";
+  return String(Math.round(n));
+}
+const pct = (x) => (x > 0 ? "+" : "") + (x * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0) + "%";
+const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const shortDate = (s) => { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(s || ""); if (!m) return s || ""; return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m[2] - 1] + " " + (+m[3]); };
+const uid = () => Math.random().toString(36).slice(2, 10);
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+/* history is saved compactly as "YYMMDD:price YYMMDD:price" */
+function parseHist(h) {
+  let out = [];
+  if (typeof h === "string") out = h.split(/\s+/).map((t) => { const m = /^(\d\d)(\d\d)(\d\d):(\d+)$/.exec(t); return m ? ["20" + m[1] + "-" + m[2] + "-" + m[3], +m[4]] : null; }).filter(Boolean);
+  else if (Array.isArray(h)) out = h.filter((x) => Array.isArray(x) && x.length === 2).map((x) => [String(x[0]), +x[1]]);
+  return out.sort((a, b) => a[0] < b[0] ? -1 : 1);
+}
+/* ---------- the rules ---------- */
+function signalFor(c, p, today, named) {
+  if (!named) return { key: "name", label: "Name it", why: "This icon has no confirmed name yet, so it has no price or plan. Type its name below." };
+  if (p == null) return { key: "name", label: "No price", why: "No tracker price is saved for this item. Type the price you see in the Free Market." };
+  if (!c) return { key: "any", label: "Sell anytime", why: "No plan is saved for this item, so it falls under the catch-all: sell whenever you want the mesos." };
+  if (c.sell && p >= c.sell) return { key: "sell", label: "Target hit", why: "The price reached its sell level of " + full(c.sell) + "." };
+  if (c.sellFrom && today >= c.sellFrom) return { key: "sell", label: "Sell now", why: c.plan === "bounce" ? "Its crate is ending. Sell into the bounce and don't hold past two days after." : (c.note || "Its bounce has passed.") };
+  if (c.plan === "sell") return { key: "sell", label: "Sell now", why: c.note || "" };
+  if (c.reviewBy && c.floor && today >= c.reviewBy && p < c.floor) return { key: "sell", label: "Cut", why: "It is still under its floor of " + full(c.floor) + " after the review date, so it is not behaving like a winner." };
+  if (c.plan === "bounce") return { key: "later", label: "Sell " + shortDate(c.sellFrom || c.e), why: (c.note ? c.note + " " : "") + "Mid-window has been the low point, so wait for the crate-end bounce" + (c.sell ? " or " + full(c.sell) + ", whichever comes first." : ".") };
+  if (c.plan === "keep") return { key: "keep", label: c.buy && p <= c.buy ? "Hold · buy zone" : "Hold", why: (c.note ? c.note + " " : "") + (c.reviewBy ? "Review on " + shortDate(c.reviewBy) + "." : "") };
+  if (c.plan === "wear") return { key: "keep", label: "Wear or sell", why: c.note || "" };
+  return { key: "any", label: "Sell anytime", why: c.note || "Common item: liquid, with little to gain from waiting." };
+}
+function view(h) {
+  const c = h.slug ? catalog[h.slug] : null;
+  const pr = h.slug ? prices.items[h.slug] : null;
+  const hist = parseHist(pr && pr.h);
+  let p = pr && pr.p != null ? pr.p : (hist.length ? hist[hist.length - 1][1] : null);
+  let prev = hist.length > 1 ? hist[hist.length - 2][1] : null, mine = false;
+  const my = h.slug && pf.my ? pf.my[h.slug] : null;
+  if (my && my.p && (!prices.asOf || my.at > prices.asOf)) { prev = p; p = my.p; mine = true; }
+  const sig = signalFor(c, p, todayStr(), !!h.slug);
+  return { h, c, pr, hist, p, prev, mine, sig, val: p != null ? p * h.qty : null, day: p != null && prev ? p / prev - 1 : null, peak: hist.length ? Math.max(p || 0, ...hist.map((x) => x[1])) : p };
+}
+
+/* ---------- saving (this browser only) ---------- */
+const KEY = "ksb.portfolio.v1";
+function normal(d) {
+  d = d && typeof d === "object" ? d : {};
+  return {
+    mesos: Math.max(0, parseInt(d.mesos, 10) || 0),
+    holdings: (Array.isArray(d.holdings) ? d.holdings : []).filter((h) => h && h.name && +h.qty > 0).map((h) => { const o = { id: String(h.id || uid()), slug: h.slug ? String(h.slug) : null, name: String(h.name).slice(0, 80), qty: Math.max(1, parseInt(h.qty, 10) || 1), ok: h.ok !== false }; if (h.desc) o.desc = String(h.desc).slice(0, 80); return o; }),
+    sold: (Array.isArray(d.sold) ? d.sold : []).filter((x) => x && x.name && +x.price > 0).slice(0, 200).map((x) => ({ name: String(x.name).slice(0, 80), price: +x.price, at: String(x.at || "") })),
+    my: d.my && typeof d.my === "object" ? d.my : {},
+  };
+}
+function changed() {
+  try { localStorage.setItem(KEY, JSON.stringify(Object.assign({}, pf, { updatedAt: new Date().toISOString() }))); }
+  catch (e) { $("#ioMsg").textContent = "This browser wouldn't save the change. Export a file to keep it."; }
+  render();
+}
+function setStatus(t, live) { $("#statusText").textContent = t; $("#liveDot").classList.toggle("live", !!live); }
+const timeStr = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
+function priceStatus() {
+  if (!prices.asOf) return setStatus("No prices loaded yet", false);
+  const age = (Date.now() - new Date(prices.asOf).getTime()) / 36e5;
+  setStatus("Prices as of " + timeStr(prices.asOf) + (age > 30 ? " · may be out of date" : ""), age <= 30);
+}
+
+/* ---------- render ---------- */
+function render() {
+  const vs = pf.holdings.map(view);
+  const priced = vs.filter((v) => v.val != null);
+  const total = priced.reduce((s, v) => s + v.val, 0);
+  const prevTotal = priced.reduce((s, v) => s + (v.prev != null ? v.prev : v.p) * v.h.qty, 0);
+  const big = $("#total"); big.textContent = full(total); big.append(el("small", { text: "mesos" }));
+  const d = $("#totalDelta"), ch = total - prevTotal;
+  d.className = "delta " + (ch > 0 ? "up" : ch < 0 ? "down" : "flat");
+  d.textContent = prevTotal && ch ? (ch > 0 ? "▲ " : "▼ ") + full(Math.abs(ch)) + " (" + pct(ch / prevTotal) + ") since the previous reading" : "No change since the previous reading";
+  const sums = {}; for (const b of BUCKETS) sums[b.key] = 0;
+  for (const v of priced) if (sums[v.sig.key] != null) sums[v.sig.key] += v.val;
+  const units = pf.holdings.reduce((s, h) => s + h.qty, 0), need = vs.filter((v) => v.sig.key === "name").reduce((s, v) => s + v.h.qty, 0);
+  $("#raise").textContent = kfmt(sums.sell + sums.any);
+  $("#count").textContent = units + (need ? " · " + need + " unpriced" : "");
+  if (document.activeElement !== $("#mesos")) $("#mesos").value = full(pf.mesos || 0);
+
+  const bar = $("#planbar"), leg = $("#legend"); bar.replaceChildren(); leg.replaceChildren();
+  for (const b of BUCKETS) {
+    const share = total ? sums[b.key] / total : 0;
+    if (share > 0) bar.append(el("button", { style: "flex:" + Math.max(share, 0.01) + " 1 0;background:" + b.color, title: b.label + ": " + full(sums[b.key]) + " mesos (" + Math.round(share * 100) + "%)", "aria-label": b.label + ", " + full(sums[b.key]) + " mesos", onclick: () => { filter = b.key; render(); } }));
+    leg.append(el("button", { onclick: () => { filter = b.key; render(); } }, el("i", { class: "sw", style: "background:" + b.color }), el("b", { text: kfmt(sums[b.key]) }), el("span", { text: b.label + (total ? " · " + Math.round(share * 100) + "%" : "") })));
+  }
+  if (!total) bar.append(el("button", { style: "flex:1;background:var(--line)", "aria-label": "No priced holdings", disabled: true }));
+  const adv = $("#advice"); adv.replaceChildren();
+  if (pf.holdings.length) {
+    adv.append("For gear money today, list the ", el("b", { text: "Sell now" }), " and ", el("b", { text: "Sell anytime" }), " items first: about ", el("b", { text: full(sums.sell + sums.any) + " mesos" }), " at these prices. Leave the ", el("b", { text: "Sell at crate end" }), " items until Dec 1 to Dec 3, and hold the keepers through their review date." + (need ? " " + need + " items still need a name or a price before they count." : ""));
+  }
+
+  const chips = $("#chips"); chips.replaceChildren();
+  for (const [k, label] of FILTERS) {
+    const n = k === "all" ? vs.length : vs.filter((v) => v.sig.key === k).length;
+    chips.append(el("button", { class: "chip", "aria-pressed": String(filter === k), text: label + " " + n, onclick: () => { filter = k; render(); } }));
+  }
+  const shown = vs.filter((v) => filter === "all" || v.sig.key === filter).sort((a, b) => (b.val == null ? -1 : b.val) - (a.val == null ? -1 : a.val));
+  const rows = $("#rows"); rows.replaceChildren();
+  if (!pf.holdings.length) rows.append(el("div", { class: "empty", text: "No holdings yet. Import a portfolio file or add items by name below." }));
+  else if (!shown.length) rows.append(el("div", { class: "empty", text: "Nothing in this group." }));
+  for (const v of shown) rows.append(rowFor(v));
+  if (sel && !pf.holdings.some((h) => h.id === sel)) sel = null;
+  if (!sel && shown.length) sel = shown[0].h.id;
+  for (const r of rows.children) if (r.dataset && r.dataset.id) r.setAttribute("aria-current", String(r.dataset.id === sel));
+  renderDetail(vs.find((v) => v.h.id === sel));
+  renderSold();
+  const dl = $("#names"); if (dl.childElementCount !== Object.keys(catalog).length) { dl.replaceChildren(); for (const s in catalog) dl.append(el("option", { value: catalog[s].n })); }
+}
+function bucketColor(key) { const b = BUCKETS.find((x) => x.key === key); return b ? b.color : "var(--ink2)"; }
+function rowFor(v) {
+  const h = v.h, c = v.c;
+  const sub = el("span", null, c && c.c ? el("i", { class: "tag", style: "font-style:normal", text: c.c }) : null, h.ok === false ? el("i", { class: "tag warn", style: "font-style:normal", text: h.slug ? "CONFIRM NAME" : "UNNAMED" }) : null, "×" + h.qty + (v.p != null && h.qty > 1 ? " · " + kfmt(v.val) + " total" : ""));
+  return el("button", { class: "row", "data-id": h.id, onclick: () => { sel = h.id; render(); if (window.matchMedia("(max-width:860px)").matches) $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }); } },
+    el("div", { class: "nm" }, el("b", { text: h.name }), sub),
+    el("div", { class: "spark" }, spark(v.hist)),
+    el("div", { class: "num" }, el("b", { text: v.p != null ? kfmt(v.p) : "—" }), v.day != null ? el("span", { class: "delta " + (v.day > 0 ? "up" : v.day < 0 ? "down" : "flat"), text: (v.day > 0 ? "▲ " : v.day < 0 ? "▼ " : "") + pct(v.day).replace(/^[+-]/, "") }) : el("span", { class: "delta flat", text: v.mine ? "your price" : "" })),
+    el("span", { class: "pill" }, el("i", { style: "background:" + bucketColor(v.sig.key) }), v.sig.label));
+}
+function spark(hist) {
+  const W = 84, H = 28, s = sv("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, "aria-hidden": "true" });
+  if (hist.length < 2) return s;
+  const ys = hist.map((x) => x[1]), lo = Math.min(...ys), hi = Math.max(...ys), sp = hi - lo || 1;
+  const pt = (i) => [3 + (i / (hist.length - 1)) * (W - 8), 4 + (1 - (ys[i] - lo) / sp) * (H - 8)];
+  s.append(sv("polyline", { points: hist.map((_, i) => pt(i).map((n) => n.toFixed(1)).join(",")).join(" "), fill: "none", stroke: "var(--s1)", "stroke-width": 1.5, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  const e = pt(hist.length - 1); s.append(sv("circle", { cx: e[0], cy: e[1], r: 2.5, fill: "var(--s1)" }));
+  return s;
+}
+function chart(v) {
+  const hist = v.hist, box = el("div", { class: "chart" });
+  if (hist.length < 2) { box.append(el("div", { class: "msg", text: hist.length ? "One day of price data so far. The line fills in as prices refresh." : "No price history yet." })); return box; }
+  const W = 560, H = 200, L = 46, R = 14, T = 12, B = 24;
+  const ys = hist.map((x) => x[1]), lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo || hi * 0.1 || 1) * 0.12, y0 = lo - pad, y1 = hi + pad;
+  const X = (i) => L + (i / (hist.length - 1)) * (W - L - R), Y = (p) => T + (1 - (p - y0) / (y1 - y0)) * (H - T - B);
+  const s = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", tabindex: "0", "aria-label": "Price history for " + v.h.name + ", " + hist.length + " days, from " + full(ys[0]) + " to " + full(ys[ys.length - 1]) + " mesos. Use the arrow keys to read each day." });
+  for (const val of [lo, (lo + hi) / 2, hi]) {
+    s.append(sv("line", { x1: L, x2: W - R, y1: Y(val), y2: Y(val), stroke: "var(--line)", "stroke-width": 1 }));
+    const t = sv("text", { x: L - 8, y: Y(val) + 4, "text-anchor": "end", fill: "var(--ink2)", "font-size": 11 }); t.textContent = kfmt(val); s.append(t);
+  }
+  const line = hist.map((_, i) => X(i).toFixed(1) + "," + Y(ys[i]).toFixed(1));
+  s.append(sv("polygon", { points: L + "," + (H - B) + " " + line.join(" ") + " " + (W - R) + "," + (H - B), fill: "var(--s1)", opacity: 0.1 }));
+  s.append(sv("polyline", { points: line.join(" "), fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  for (const [i, anchor] of [[0, "start"], [hist.length - 1, "end"]]) { const t = sv("text", { x: X(i), y: H - 6, "text-anchor": anchor, fill: "var(--ink2)", "font-size": 11 }); t.textContent = shortDate(hist[i][0]); s.append(t); }
+  const hair = sv("line", { y1: T, y2: H - B, stroke: "var(--ink2)", "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" });
+  const dot = sv("circle", { r: 4.5, fill: "var(--s1)", stroke: "var(--panel)", "stroke-width": 2, cx: X(hist.length - 1), cy: Y(ys[ys.length - 1]) });
+  s.append(hair, dot);
+  const tip = el("div", { class: "tip" }); let at = hist.length - 1;
+  const show = (i) => { at = Math.max(0, Math.min(hist.length - 1, i)); hair.setAttribute("x1", X(at)); hair.setAttribute("x2", X(at)); hair.setAttribute("visibility", "visible"); dot.setAttribute("cx", X(at)); dot.setAttribute("cy", Y(ys[at])); tip.replaceChildren(el("b", { text: full(ys[at]) }), shortDate(hist[at][0])); tip.style.display = "block"; tip.style.left = (X(at) / W * 100) + "%"; tip.style.top = (Y(ys[at]) / H * 100) + "%"; };
+  const hide = () => { hair.setAttribute("visibility", "hidden"); tip.style.display = "none"; dot.setAttribute("cx", X(hist.length - 1)); dot.setAttribute("cy", Y(ys[ys.length - 1])); };
+  s.addEventListener("pointermove", (e) => { const r = s.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W; show(Math.round((x - L) / (W - L - R) * (hist.length - 1))); });
+  s.addEventListener("pointerleave", hide); s.addEventListener("blur", hide);
+  s.addEventListener("keydown", (e) => { if (e.key === "ArrowLeft") { show(at - 1); e.preventDefault(); } else if (e.key === "ArrowRight") { show(at + 1); e.preventDefault(); } });
+  box.append(s, tip);
+  return box;
+}
+function renderDetail(v) {
+  const d = $("#detail"); d.replaceChildren();
+  if (!v) { d.append(el("div", { class: "empty", text: "Pick an item to see its price, plan and actions." })); return; }
+  const h = v.h, c = v.c;
+  d.append(el("div", null, el("div", { class: "eyebrow", text: c ? [c.c, c.r, c.f].filter(Boolean).join(" · ") : (h.slug ? "No plan saved" : "Unnamed icon") }), el("h2", { text: h.name })));
+  d.append(el("div", { class: "price-line" }, el("b", { text: v.p != null ? full(v.p) : "No price" }), v.day != null ? el("span", { class: "delta " + (v.day > 0 ? "up" : v.day < 0 ? "down" : "flat"), text: (v.day > 0 ? "▲ " : v.day < 0 ? "▼ " : "") + pct(v.day) + (v.mine ? " vs tracker" : " on the day") }) : null, el("span", { class: "pill" }, el("i", { style: "background:" + bucketColor(v.sig.key) }), v.sig.label)));
+  if (h.slug) {
+    d.append(chart(v));
+    if (v.hist.length > 1) d.append(el("details", { class: "tbl" }, el("summary", { text: "Show prices as a table" }), el("table", null, ...v.hist.slice().reverse().map((x) => el("tr", null, el("td", { text: shortDate(x[0]) }), el("td", { text: full(x[1]) }))))));
+  }
+  if (v.sig.why || h.desc) d.append(el("div", { class: "why" }, el("b", { text: v.sig.label }), v.sig.why || "", h.desc ? el("div", { style: "margin-top:4px;color:var(--ink2)", text: "From your screenshot: " + h.desc }) : null));
+  const kv = el("div", { class: "kv" });
+  const add = (k, val) => { if (val != null && val !== "") kv.append(el("div", null, el("span", { text: k }), el("b", { text: val }))); };
+  add("You hold", "×" + h.qty + (v.val != null ? " · " + full(v.val) : ""));
+  add("Peak seen", v.peak ? full(v.peak) + (v.p ? " (" + pct(v.p / v.peak - 1) + ")" : "") : null);
+  add("Sellers on tracker", v.pr && v.pr.s != null ? String(v.pr.s) : null);
+  add("Price source", v.p == null ? null : v.mine ? "Your in-game price" : v.pr && v.pr.t ? "Cozy Market, " + timeStr(v.pr.t) : "Tracker sale median");
+  if (c) { add("Supply ends", c.e ? shortDate(c.e) : null); add("Buy at or below", c.buy ? full(c.buy) : null); add("Sell at or above", c.sell ? full(c.sell) : null); add("Review by", c.reviewBy ? shortDate(c.reviewBy) + " · floor " + kfmt(c.floor) : null); }
+  d.append(kv);
+
+  const acts = el("div", { class: "acts" });
+  const soldIn = el("input", { class: "in sm", id: "soldPrice", inputmode: "numeric", value: v.p != null ? String(Math.round(v.p)) : "", "aria-label": "Sale price" });
+  acts.append(el("div", { class: "line" }, el("label", { for: "soldPrice", text: "Sold one for" }), soldIn, el("button", { class: "btn pri", text: "Record sale", onclick: () => {
+    const p = parseInt(String(soldIn.value).replace(/[^\d]/g, ""), 10); if (!p) { soldIn.focus(); return; }
+    pf.mesos = (pf.mesos || 0) + p; pf.sold = [{ name: h.name, price: p, at: todayStr() }].concat(pf.sold || []).slice(0, 200);
+    h.qty -= 1; if (h.qty <= 0) pf.holdings = pf.holdings.filter((x) => x.id !== h.id); changed();
+  } })));
+  if (h.slug) {
+    const myIn = el("input", { class: "in sm", id: "myPrice", inputmode: "numeric", placeholder: "in-game price", "aria-label": "Price you see in game" });
+    acts.append(el("div", { class: "line" }, el("label", { for: "myPrice", text: "My price" }), myIn, el("button", { class: "btn", text: "Use it", onclick: () => { const p = parseInt(String(myIn.value).replace(/[^\d]/g, ""), 10); if (!p) { myIn.focus(); return; } pf.my = pf.my || {}; pf.my[h.slug] = { p, at: new Date().toISOString() }; changed(); } })));
+  }
+  const qtyIn = el("input", { class: "in xs", id: "qty", type: "number", min: "1", value: String(h.qty), "aria-label": "Quantity held" });
+  qtyIn.addEventListener("change", () => { const q = Math.max(1, parseInt(qtyIn.value, 10) || 1); if (q !== h.qty) { h.qty = q; changed(); } });
+  const nameIn = el("input", { class: "in", id: "rename", list: "names", value: h.slug ? h.name : "", placeholder: "Exact item name", "aria-label": "Item name", style: "flex:1" });
+  const setName = () => { const n = nameIn.value.trim(); if (!n) { nameIn.focus(); return; } const hit = Object.keys(catalog).find((s) => catalog[s].n.toLowerCase() === n.toLowerCase()); h.slug = hit || slugify(n); h.name = hit ? catalog[hit].n : n; h.ok = true; changed(); };
+  acts.append(el("div", { class: "line" }, el("label", { for: "rename", text: "Name" }), nameIn, el("button", { class: "btn", text: h.ok === false ? "Confirm name" : "Rename", onclick: setName })));
+  acts.append(el("div", { class: "line" }, el("label", { for: "qty", text: "Quantity" }), qtyIn, el("button", { class: "btn ghost", text: "Remove item", onclick: () => { pf.holdings = pf.holdings.filter((x) => x.id !== h.id); changed(); } })));
+  d.append(acts);
+}
+function renderSold() {
+  const s = $("#sold"); s.replaceChildren();
+  const list = pf.sold || [];
+  if (!list.length) { s.append(el("div", null, el("span", { style: "color:var(--ink2)", text: "Nothing recorded yet. Use Record sale on an item." }))); return; }
+  s.append(el("div", null, el("b", { text: list.length + " sold" }), el("b", { text: full(list.reduce((a, x) => a + x.price, 0)) + " mesos" })));
+  for (const x of list.slice(0, 12)) s.append(el("div", null, el("span", { text: x.name + " · " + shortDate(x.at) }), el("span", { text: full(x.price) })));
+}
+
+/* ---------- add by name ---------- */
+function addHolding(name, qty, extra) {
+  const n = String(name || "").trim(); if (!n) return;
+  const hit = Object.keys(catalog).find((s) => catalog[s].n.toLowerCase() === n.toLowerCase());
+  const slug = hit || slugify(n), same = pf.holdings.find((h) => h.slug === slug);
+  if (same) same.qty += qty; else pf.holdings.push(Object.assign({ id: uid(), slug, name: hit ? catalog[hit].n : n, qty, ok: true }, extra || {}));
+}
+$("#addBtn").addEventListener("click", () => { const n = $("#addName").value; if (!n.trim()) { $("#addName").focus(); return; } addHolding(n, Math.max(1, parseInt($("#addQty").value, 10) || 1)); $("#addName").value = ""; $("#addQty").value = "1"; changed(); });
+$("#mesos").addEventListener("change", (e) => { const n = parseInt(String(e.target.value).replace(/[^\d]/g, ""), 10) || 0; if (n !== pf.mesos) { pf.mesos = n; changed(); } else render(); });
+
+/* ---------- export, import, copy ---------- */
+$("#exportBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(Object.assign({}, pf, { updatedAt: new Date().toISOString() }), null, 1)], { type: "application/json" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: "kerningstreetbets-portfolio.json" }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  $("#ioMsg").textContent = "Exported " + pf.holdings.length + " rows.";
+});
+$("#importFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try { const d = normal(JSON.parse(await f.text())); if (!d.holdings.length) throw new Error("empty"); pf = d; sel = null; changed(); $("#ioMsg").textContent = "Imported " + d.holdings.length + " rows. This replaced what was here."; }
+  catch (err) { $("#ioMsg").textContent = "That file isn't a portfolio export. Pick a .json file exported from this app."; }
+});
+$("#copyBtn").addEventListener("click", async () => {
+  const lines = pf.holdings.map(view).sort((a, b) => (b.val || 0) - (a.val || 0)).map((v) => v.h.name + " x" + v.h.qty + (v.p != null ? " @ " + Math.round(v.p) : "") + " [" + v.sig.label + "]");
+  const text = "Mesos on hand: " + (pf.mesos || 0) + "\n" + lines.join("\n");
+  try { await navigator.clipboard.writeText(text); $("#ioMsg").textContent = "Copied. Paste it into your Claude chat."; } catch (e) { $("#ioMsg").textContent = "Couldn't copy. Use Export file instead."; }
+});
+
+/* ---------- boot ---------- */
+async function loadData(first) {
+  try {
+    const get = (u) => fetch(u, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(u); return r.json(); });
+    const [c, p] = await Promise.all([get("data/catalog.json"), get("data/prices.json")]);
+    catalog = c.items || {}; prices = { asOf: p.asOf || null, items: p.items || {} };
+    priceStatus(); render();
+  } catch (e) { if (first) setStatus("Couldn't load the price files. Reload to try again.", false); }
+}
+gotData = true;
+try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) pf = normal(saved); } catch (e) {}
+render();
+loadData(true);
+setInterval(() => loadData(false), 5 * 60 * 1000);
+</script>
+</body>
+</html>

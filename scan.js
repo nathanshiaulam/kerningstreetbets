@@ -183,10 +183,11 @@
   }
   async function start() {
     if (st.on) return;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { $("#ioMsg").textContent = "This browser can't share a window. Use Chrome or Edge on your computer, or use screenshots."; return; }
+    openPanel();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { say("This browser can't share a screen (phones and tablets can't). Open this page in Chrome or Edge on a computer, or use screenshots."); return; }
     let stream;
     try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 10, max: 15 } }, audio: false }); }
-    catch (e) { $("#ioMsg").textContent = "Sharing was cancelled, so nothing was scanned."; return; }
+    catch (e) { say(e && e.name === "NotAllowedError" ? "Sharing was cancelled or blocked. Click Share MapleStory window to try again." : "The browser couldn't start sharing (" + (e && e.name || "error") + "). Try again, or use screenshots."); return; }
     try { st.ac = st.ac || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
     st.on = true; st.stream = stream; st.track = stream.getVideoTracks()[0];
     st.track.addEventListener("ended", stop);
@@ -244,11 +245,16 @@
     st.busy = false; renderScan();
   }
   function openPanel() { const p = $("#scanPanel"); if (p.hidden) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "start" }); } setButtons(); renderScan(); loadBook().then(renderScan); }
-  function setButtons() { $("#scanStop").hidden = !st.on; $("#scanBtn").textContent = st.on ? "Sharing…" : "Share MapleStory window"; $("#scanBtn").disabled = st.on; $("#scanAgain").hidden = st.on; }
+  function setButtons() {
+    $("#scanStop").hidden = !st.on; $("#scanAgain").hidden = st.on;
+    for (const id of ["#scanBtn", "#scanTop"]) { const b = $(id); b.disabled = st.on; b.textContent = st.on ? "Sharing…" : id === "#scanTop" ? "Scan inventory" : "Share MapleStory window"; }
+    if (!st.on && !$("#scanStatus").textContent) say("Click Share MapleStory window to begin, or use screenshots.");
+  }
 
   /* ---------- wiring ---------- */
   $("#scanBtn").addEventListener("click", start);
   $("#scanAgain").addEventListener("click", start);
+  $("#scanTop").addEventListener("click", start);
   $("#scanStop").addEventListener("click", stop);
   $("#scanReset").addEventListener("click", reset);
   $("#scanFiles").addEventListener("change", (e) => { const f = e.target.files; fromFiles(f).finally(() => { e.target.value = ""; }); });

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kerning Street Bets</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%233d3ad6'/%3E%3Cpath d='M3 11l3-4 3 2 4-5' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=Pixelify+Sans:wght@500&display=swap" rel="stylesheet">
@@ -126,6 +127,26 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
 .card{padding:18px;display:flex;flex-direction:column;gap:12px}
 .card h3{font-family:var(--display);font-size:18px;font-weight:700;margin:0}
 .card p{margin:0;color:var(--ink2);font-size:14px;max-width:65ch}
+.who{display:flex;gap:10px;align-items:center;min-width:0}
+.ico{width:32px;height:32px;flex:none;border-radius:6px;image-rendering:pixelated;background:#ded9cf}
+.scan-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.scan-status{font-weight:600;min-height:1.45em}
+.scan-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:start}
+@media (max-width:860px){.scan-body{grid-template-columns:minmax(0,1fr)}}
+.scan-left{display:flex;flex-direction:column;gap:12px;min-width:0}
+.scan-left canvas{max-width:100%;border-radius:10px;background:var(--wash);border:1px solid var(--line);min-height:120px}
+.scan-steps{margin:0;padding-left:20px;color:var(--ink2);font-size:14px;display:flex;flex-direction:column;gap:4px}
+.scan-steps b{color:var(--ink)}
+.scan-right{display:flex;flex-direction:column;gap:10px;min-width:0}
+.scan-counts{font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.scan-list{display:flex;flex-direction:column;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.scan-item{display:grid;grid-template-columns:32px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line)}
+.scan-item:last-child{border-bottom:0}
+.scan-item.todo{background:var(--wash)}
+.scan-item .q{font-weight:600;font-variant-numeric:tabular-nums}
+.scan-item .sub{font-size:12px;color:var(--ink2);white-space:nowrap}
+.scan-note{padding:12px;color:var(--ink2);font-size:14px}
+.check{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink2);cursor:pointer}
 .drop{border:1.5px dashed var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 .drop.over{border-color:var(--accent);background:var(--wash)}
 .thumbs{display:flex;gap:8px;flex-wrap:wrap}
@@ -167,6 +188,41 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
     <div class="advice" id="advice"></div>
   </section>
 
+  <section class="panel card" id="scanPanel" aria-label="Inventory scan" hidden>
+    <div class="scan-head">
+      <h3>Inventory scan</h3>
+      <div class="line">
+        <button class="btn" id="scanStop" hidden>Stop sharing</button>
+        <button class="btn" id="scanAgain" hidden>Share again</button>
+        <button class="btn ghost" id="scanReset">Start over</button>
+      </div>
+    </div>
+    <div class="scan-status" id="scanStatus" role="status" aria-live="polite"></div>
+    <div class="scan-body">
+      <div class="scan-left">
+        <canvas id="scanPreview" width="10" height="10" aria-label="What the scanner sees"></canvas>
+        <ol class="scan-steps">
+          <li><b>Map it.</b> Open the inventory on the Deco tab. Keep the pointer off the items (the title bar or scrollbar works) and scroll from the top to the last row, a notch at a time. A soft tick means new rows were added.</li>
+          <li><b>Name it.</b> Hover each different item once. A rising two-tone beep means a new name was read. A low beep means it was already known.</li>
+          <li><b>Sync it.</b> Come back here, check the list, and sync. Copies are counted from the map, so one hover per kind of item is enough, and names you have already synced are remembered next time.</li>
+        </ol>
+        <div class="line">
+          <label class="check"><input type="checkbox" id="scanSound" checked> Sounds</label>
+          <label class="check"><input type="checkbox" id="scanSpeak"> Say item names aloud</label>
+        </div>
+      </div>
+      <div class="scan-right">
+        <div class="scan-counts" id="scanCounts"></div>
+        <div class="scan-list" id="scanList"></div>
+        <div class="line">
+          <button class="btn pri" id="scanApply" disabled>Sync portfolio to this scan</button>
+          <button class="btn" id="scanUndo" hidden>Undo sync</button>
+        </div>
+        <div class="msg" id="scanMsg" role="status"></div>
+      </div>
+    </div>
+  </section>
+
   <div class="grid">
     <section class="panel" aria-label="Holdings">
       <div class="list-head">
@@ -180,8 +236,12 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
   <div class="two">
     <section class="panel card" aria-label="Scan and backup">
       <h3>Scan inventory</h3>
-      <p>Next build: share your MapleStory window, hover your items, and the portfolio syncs to what is in your inventory. Until then, import a portfolio file or add items by name.</p>
-      <div class="line"><button class="btn pri" id="scanBtn" disabled>Share MapleStory window</button></div>
+      <p>Share your MapleStory window, scroll through the Deco tab once, then hover each different item. Only unworn items (red badge) are counted. The picture is read in this browser and is never uploaded.</p>
+      <div class="line">
+        <button class="btn pri" id="scanBtn">Share MapleStory window</button>
+        <label class="btn" for="scanFiles" style="cursor:pointer">Use screenshots</label>
+        <input type="file" id="scanFiles" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      </div>
       <h3 style="margin-top:8px">Back up and move</h3>
       <p>Your portfolio is saved in this browser only. Export it to keep a copy or move it to another device.</p>
       <div class="line">
@@ -298,7 +358,7 @@ function normal(d) {
   d = d && typeof d === "object" ? d : {};
   return {
     mesos: Math.max(0, parseInt(d.mesos, 10) || 0),
-    holdings: (Array.isArray(d.holdings) ? d.holdings : []).filter((h) => h && h.name && +h.qty > 0).map((h) => { const o = { id: String(h.id || uid()), slug: h.slug ? String(h.slug) : null, name: String(h.name).slice(0, 80), qty: Math.max(1, parseInt(h.qty, 10) || 1), ok: h.ok !== false }; if (h.desc) o.desc = String(h.desc).slice(0, 80); return o; }),
+    holdings: (Array.isArray(d.holdings) ? d.holdings : []).filter((h) => h && h.name && +h.qty > 0).map((h) => { const o = { id: String(h.id || uid()), slug: h.slug ? String(h.slug) : null, name: String(h.name).slice(0, 80), qty: Math.max(1, parseInt(h.qty, 10) || 1), ok: h.ok !== false }; if (h.desc) o.desc = String(h.desc).slice(0, 80); if (typeof h.icon === "string" && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(h.icon) && h.icon.length < 8000) o.icon = h.icon; return o; }),
     sold: (Array.isArray(d.sold) ? d.sold : []).filter((x) => x && x.name && +x.price > 0).slice(0, 200).map((x) => ({ name: String(x.name).slice(0, 80), price: +x.price, at: String(x.at || "") })),
     my: d.my && typeof d.my === "object" ? d.my : {},
   };
@@ -352,7 +412,7 @@ function render() {
   }
   const shown = vs.filter((v) => filter === "all" || v.sig.key === filter).sort((a, b) => (b.val == null ? -1 : b.val) - (a.val == null ? -1 : a.val));
   const rows = $("#rows"); rows.replaceChildren();
-  if (!pf.holdings.length) rows.append(el("div", { class: "empty", text: "No holdings yet. Import a portfolio file or add items by name below." }));
+  if (!pf.holdings.length) rows.append(el("div", { class: "empty", text: "No holdings yet. Scan your inventory, import a portfolio file, or add items by name below." }));
   else if (!shown.length) rows.append(el("div", { class: "empty", text: "Nothing in this group." }));
   for (const v of shown) rows.append(rowFor(v));
   if (sel && !pf.holdings.some((h) => h.id === sel)) sel = null;
@@ -367,7 +427,7 @@ function rowFor(v) {
   const h = v.h, c = v.c;
   const sub = el("span", null, c && c.c ? el("i", { class: "tag", style: "font-style:normal", text: c.c }) : null, h.ok === false ? el("i", { class: "tag warn", style: "font-style:normal", text: h.slug ? "CONFIRM NAME" : "UNNAMED" }) : null, "×" + h.qty + (v.p != null && h.qty > 1 ? " · " + kfmt(v.val) + " total" : ""));
   return el("button", { class: "row", "data-id": h.id, onclick: () => { sel = h.id; render(); if (window.matchMedia("(max-width:860px)").matches) $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }); } },
-    el("div", { class: "nm" }, el("b", { text: h.name }), sub),
+    el("div", { class: "who" }, h.icon ? el("img", { class: "ico", src: h.icon, alt: "" }) : null, el("div", { class: "nm" }, el("b", { text: h.name }), sub)),
     el("div", { class: "spark" }, spark(v.hist)),
     el("div", { class: "num" }, el("b", { text: v.p != null ? kfmt(v.p) : "—" }), v.day != null ? el("span", { class: "delta " + (v.day > 0 ? "up" : v.day < 0 ? "down" : "flat"), text: (v.day > 0 ? "▲ " : v.day < 0 ? "▼ " : "") + pct(v.day).replace(/^[+-]/, "") }) : el("span", { class: "delta flat", text: v.mine ? "your price" : "" })),
     el("span", { class: "pill" }, el("i", { style: "background:" + bucketColor(v.sig.key) }), v.sig.label));
@@ -497,5 +557,7 @@ render();
 loadData(true);
 setInterval(() => loadData(false), 5 * 60 * 1000);
 </script>
+<script src="scan-core.js"></script>
+<script src="scan.js"></script>
 </body>
 </html>

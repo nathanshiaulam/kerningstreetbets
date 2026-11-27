@@ -1,0 +1,34 @@
+name: Build icon signatures
+on:
+  schedule:
+    - cron: "47 10 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/build-icons.mjs"
+      - ".github/workflows/icons.yml"
+permissions:
+  contents: write
+concurrency:
+  group: icons
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Install the image reader
+        run: npm install --no-save --no-audit --no-fund sharp
+      - name: Build signatures
+        run: |
+          out=$(node scripts/build-icons.mjs 2>&1) || echo "::warning title=Icon script::${out//$'\n'/ }"
+          echo "$out"
+      - name: Commit and push
+        run: |
+          git config user.name "icon-signatures"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/icons.json data/icons-log.json
+          if git diff --cached --quiet; then echo "::notice title=Icons::Nothing changed"; exit 0; fi
+          out=$(git commit -m "Update icon signatures" 2>&1) || { echo "::error title=Commit failed::${out//$'\n'/ }"; exit 1; }
+          out=$(git push 2>&1) || out=$(git pull --rebase 2>&1 && git push 2>&1) || { echo "::error title=Push failed::${out//$'\n'/ }"; exit 1; }

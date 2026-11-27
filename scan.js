@@ -233,7 +233,7 @@
   }
   function reset() {
     st.map = new S.InvMap(); st.named = []; st.manual = []; st.hover = null; st.lastRows = null; st.grid = null; st.sawOpenGrid = false; st.dirty = true;
-    $("#scanMsg").textContent = ""; say(st.on ? "Started over. Looking for your item inventory…" : "Started over."); renderScan();
+    $("#scanMsg").textContent = ""; say(st.on ? "Scan cleared. Looking for your item inventory…" : "Scan cleared."); renderScan();
   }
   async function fromFiles(files) {
     const list = [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));

@@ -239,7 +239,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
         <button class="btn pri" id="scanAgain">Share MapleStory window</button>
         <button class="btn" id="scanStop" hidden>Stop sharing</button>
         <label class="btn" for="scanFiles" style="cursor:pointer">Use screenshots</label>
-        <button class="btn ghost" id="scanReset">Start over</button>
+        <button class="btn" id="scanReset">Clear scan</button>
       </div>
     </div>
     <div class="scan-status" id="scanStatus" role="status" aria-live="polite"></div>
@@ -304,6 +304,12 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
         <label class="btn" for="importFile" style="cursor:pointer">Import file</label>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
         <button class="btn" id="copyBtn">Copy list for Claude</button>
+      </div>
+      <h3 style="margin-top:8px">Update or reset</h3>
+      <p>Get the newest version of the site without a hard refresh, or wipe everything this site has saved in this browser.</p>
+      <div class="line">
+        <button class="btn" id="updateBtn">Get latest version</button>
+        <button class="btn" id="wipeBtn">Reset everything</button>
       </div>
       <div class="msg" id="ioMsg" role="status"></div>
     </section>
@@ -609,6 +615,26 @@ $("#copyBtn").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(text); $("#ioMsg").textContent = "Copied. Paste it into your Claude chat."; } catch (e) { $("#ioMsg").textContent = "Couldn't copy. Use Export file instead."; }
 });
 
+/* ---------- update and reset ---------- */
+const BUILD = "2026-11-26 20:25 PT";
+async function freshReload() {
+  // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
+  const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];
+  await Promise.all(files.map((u) => fetch(u, { cache: "reload" }).catch(() => null)));
+  location.reload();
+}
+async function checkBuild() {
+  try { const t = await fetch("index.html", { cache: "no-store" }).then((r) => r.text()), m = /const BUILD = "([^"]+)"/.exec(t); if (m && m[1] !== BUILD) { const b = $("#updateBtn"); b.textContent = "New version ready: update now"; b.classList.add("pri"); $("#scanTop").insertAdjacentElement("afterend", Object.assign(el("button", { class: "btn", id: "updateTop", text: "Update site" }), { onclick: freshReload })); checkBuild = async () => {}; } } catch (e) {}
+}
+$("#updateBtn").addEventListener("click", () => { $("#ioMsg").textContent = "Getting the latest version…"; freshReload(); });
+let wipeArmed = 0;
+$("#wipeBtn").addEventListener("click", () => {
+  const b = $("#wipeBtn");
+  if (Date.now() - wipeArmed > 5000) { wipeArmed = Date.now(); b.textContent = "This deletes your saved portfolio here. Click again to confirm"; setTimeout(() => { if (Date.now() - wipeArmed >= 5000) b.textContent = "Reset everything"; }, 5100); return; }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("ksb.")) localStorage.removeItem(k); } catch (e) {}
+  freshReload();
+});
+
 /* ---------- boot ---------- */
 async function loadData(first) {
   try {
@@ -616,7 +642,7 @@ async function loadData(first) {
     const [c, p] = await Promise.all([get("data/catalog.json"), get("data/prices.json")]);
     catalog = c.items || {}; crates = c.crates || {}; prices = { asOf: p.asOf || null, items: p.items || {} };
     priceStatus(); render();
-    liveTracker();
+    liveTracker(); checkBuild();
   } catch (e) { if (first) setStatus("Couldn't load the price files. Reload to try again.", false); }
 }
 // Daily history and seller counts straight from the tracker's public data file, read in this browser.
@@ -666,6 +692,7 @@ function route() {
 }
 window.addEventListener("hashchange", route); route();
 gotData = true;
+$("#foot").append(" Build " + BUILD + ".");
 try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved) pf = normal(saved); } catch (e) {}
 render();
 loadData(true);

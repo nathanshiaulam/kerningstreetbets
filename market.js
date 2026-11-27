@@ -116,11 +116,16 @@
 
   // Good buys: each screen is one reason the market may be underpricing something.
   function goodBuys(today) {
-    const st = crateStats(), out = { zone: [], ending: [], dip: [], climb: [], scarce: [] };
+    const st = crateStats(), out = { zone: [], watch: [], ending: [], dip: [], climb: [], scarce: [] };
     for (const s in catalog) {
       const c = catalog[s], pr = prices.items[s]; if (!pr || !(pr.p > 0)) continue;
       const p = pr.p, tr = trend7(pr, today), row = { slug: s, c, pr, p, tr };
-      if (c.buy && p <= c.buy && c.plan !== "sell") { out.zone.push(Object.assign({ why: "At or under the buy level of " + full(c.buy) + " set for it." + (c.note ? " " + c.note : ""), score: c.buy / p }, row)); continue; }
+      if (c.buy && c.plan !== "sell") {
+        // A hand-set buy level puts the item on exactly one screen: in its zone, or waiting above it.
+        const hit = p <= c.buy, over = Math.max(1, Math.round((p / c.buy - 1) * 100));
+        out[hit ? "zone" : "watch"].push(Object.assign({ why: (hit ? "At or under the buy level of " + full(c.buy) + " set for it." : "Buy level " + full(c.buy) + ". Today's price is " + over + "% above it.") + (c.note ? " " + c.note : ""), score: c.buy / p }, row));
+        continue;
+      }
       if (c.plan === "sell") continue;
       const cr = c.c ? crates[c.c] : null, k = c.c ? st[c.c] : null; if (!cr || !k) continue;
       const mult = p / k.floor, left = daysBetween(today, cr.end);
@@ -138,6 +143,7 @@
   }
   const SCREENS = [
     ["zone", "In its buy zone", "Items with a hand-set buy level that are trading at or below it."],
+    ["watch", "Above its buy level", "Items with a hand-set buy level that cost more than it today, closest first."],
     ["ending", "Crate ends within a week", "Rarer items whose supply is about to stop."],
     ["dip", "Dipped right after its crate ended", "The pattern earlier winners showed before recovering."],
     ["climb", "Old crate, still climbing", "No new supply, and buyers are paying more each week."],

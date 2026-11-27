@@ -26,10 +26,9 @@
     for (const k in by) {
       const ps = by[k].map((x) => x.p).sort((a, b) => a - b), half = ps.slice(0, Math.max(1, ps.length >> 1));
       const ls = by[k].map((x) => x.l).filter((x) => x > 0).sort((a, b) => a - b);
-      // The common tier, by published drop rate: the most common rate, plus the next one down while the tier
-      // holds fewer than ten items. Only worked out when nearly every item in the crate has a rate saved.
-      let common = null; const rs = (odds[k] || []).sort((a, b) => b - a);
-      if (rs.length >= size[k] * 0.9) { common = rs[0]; while (rs.filter((x) => x >= common).length < 10 && rs.some((x) => x < common)) common = rs.find((x) => x < common); }
+      // An even share of the crate, by published drop rate (2% in a 50-piece crate). Pieces that drop less often
+      // than that are the rare ones. Only worked out when nearly every item in the crate has a rate saved.
+      const rs = odds[k] || [], common = rs.length >= size[k] * 0.9 ? 100 / size[k] : null;
       stats[k] = { floor: half[half.length >> 1], scarce: ls.length >= 10 ? ls[Math.floor(ls.length / 10)] : 0, n: ps.length, common };
     }
     statsFor = prices.asOf + Object.keys(catalog).length;
@@ -47,15 +46,16 @@
     }
     return typeof pr.tr === "number" ? pr.tr : null;
   }
-  // "Trash": a crate item from the common drop tier that sits at its crate's floor with nothing pointing
-  // up. Needs no hand-set plan, a price within 10% of the floor, and no rise over the week. Where the crate's
-  // drop rates are saved the item must be in the common tier; a rarer piece is never trash, however cheap.
-  // Where they are not saved yet, the item must at least not be among the crate's least-listed tenth.
+  // "Trash": a crate item nobody would miss, the kind to trade in for Aurora Stamps. It must sit within 12%
+  // of its crate's floor with no rise over the week and no hand-set plan, drop at least as often as an even
+  // share of its crate (a rarer piece is never trash, however cheap), and not be an accessory: face and eye
+  // pieces, earrings and rings have held premiums before, so they are a sell, not stamp fodder.
+  const ACCESSORY = /face|eye|earring|ring/i;
   function trash(c, pr, today) {
-    if (!c || !c.c || !pr || !(pr.p > 0) || c.plan || c.buy || c.sell) return false;
+    if (!c || !c.c || !pr || !(pr.p > 0) || c.plan || c.buy || c.sell || ACCESSORY.test(c.f || "")) return false;
     const st = crateStats()[c.c]; if (!st) return false;
-    if (pr.p > st.floor * 1.1 || trend7(pr, today) > 0.1) return false;
-    if (st.common) return parseFloat(c.r) >= st.common;
+    if (pr.p > st.floor * 1.12 || trend7(pr, today) > 0.1) return false;
+    if (st.common) return parseFloat(c.r) >= st.common - 1e-9;
     if (parseFloat(c.r) < 2) return false;                        // a saved rate from a rare tier rules it out even without the full table
     return !(st.scarce && pr.l > 0 && pr.l <= st.scarce);
   }

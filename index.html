@@ -498,7 +498,7 @@ function render() {
     chips.append(el("button", { class: "chip", "aria-pressed": String(filter === k), text: label + " " + n, onclick: () => { filter = k; render(); } }));
   }
   const junk = vs.filter((v) => v.trash);
-  if (junk.length || filter === "trash") chips.append(el("button", { class: "chip", "aria-pressed": String(filter === "trash"), title: "Common-tier crate items sitting at their crate's floor with nothing pointing up. A question mark means the crate's drop rates aren't saved yet.", text: "Trash NX " + junk.reduce((a, v) => a + v.h.qty, 0), onclick: () => { filter = "trash"; render(); } }));
+  if (junk.length || filter === "trash") chips.append(el("button", { class: "chip", "aria-pressed": String(filter === "trash"), title: "Crate items at their crate's floor that are not rare drops and not accessories: the ones to trade in for Aurora Stamps. A question mark means the crate's drop rates aren't saved yet.", text: "Trash NX " + junk.reduce((a, v) => a + v.h.qty, 0), onclick: () => { filter = "trash"; render(); } }));
   const shown = vs.filter((v) => filter === "all" || (filter === "trash" ? v.trash : v.sig.key === filter)).sort((a, b) => (b.val == null ? -1 : b.val) - (a.val == null ? -1 : a.val));
   const rows = $("#rows"); rows.replaceChildren();
   if (!pf.holdings.length) rows.append(el("div", { class: "empty", text: "No holdings yet. Scan your inventory, import a portfolio file, or add items by name below." }));
@@ -575,7 +575,7 @@ function renderDetail(v) {
   add("You hold", "×" + h.qty + (v.val != null ? " · " + full(v.val) : ""));
   add("Peak seen", v.peak ? full(v.peak) + (v.p ? " (" + pct(v.p / v.peak - 1) + ")" : "") : null);
   add("Sellers on tracker", v.pr && v.pr.s != null ? String(v.pr.s) : null);
-  add("Trash NX", v.trash ? (tiered(h.slug) ? "Yes: common drop tier, at its crate's floor" : "Probably: at its crate's floor, drop rate not checked yet") : null);
+  add("Trash NX", v.trash ? (tiered(h.slug) ? "Yes: at its crate's floor, not a rare drop, not an accessory" : "Probably: at its crate's floor, drop rate not checked yet") : null);
   add("Price source", v.p == null ? null : v.mine ? "Your in-game price" : v.pr && v.pr.t ? "Cozy Market, " + timeStr(v.pr.t) : "Tracker sale median");
   if (c) { add("Supply ends", c.e ? shortDate(c.e) : null); add("Buy at or below", c.buy ? full(c.buy) : null); add("Sell at or above", c.sell ? full(c.sell) : null); add("Review by", c.reviewBy ? shortDate(c.reviewBy) + " · floor " + kfmt(c.floor) : null); }
   d.append(kv);
@@ -635,7 +635,7 @@ $("#copyBtn").addEventListener("click", async () => {
 });
 
 /* ---------- update and reset ---------- */
-const BUILD = "2026-11-27 11:42 PT";
+const BUILD = "2026-11-27 11:49 PT";
 async function freshReload() {
   // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
   const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];

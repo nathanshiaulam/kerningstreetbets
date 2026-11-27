@@ -79,7 +79,9 @@
       let name = "";
       try {
         const w = await reader(), r = await w.recognize(toCanvas(S.nameImage(img, tip, 3)));
-        if (r.data.confidence >= 55) name = S.snapName(S.cleanName(r.data.text), knownNames());
+        let text = r.data.text, conf = r.data.confidence;
+        if (tip.name2) { const r2 = await w.recognize(toCanvas(S.nameImage(img, tip, 3, true))); text = text.trim() + " " + r2.data.text; conf = Math.min(conf, r2.data.confidence); }   // a long name wraps onto a second line
+        if (conf >= 55) name = S.snapName(S.cleanName(text), knownNames());
       } catch (e) { say("The text reader didn't load. Check your connection and reload the page."); cur.done = false; return; }
       if (name.length < 2) { beep("bad"); say("Couldn't read that name. Move off the item and hover it again."); cur.done = false; cur.n = 0; return; }
       st.named.push({ name, crop, untr: { [badge]: tip.untradable } });
@@ -105,7 +107,8 @@
     for (const r of rows) { let best = null; for (const bk of st.book) { const d = S.dist(bk.fp, r.g.fp); if (d <= S.SAME && (!best || d < best.d)) best = { d, bk }; } if (best) { r.name = best.bk.name; r.src = "book"; } }
     const loose = [];
     for (const n of st.named) {
-      const m = groups.length ? S.matchTip(n.crop, groups) : null;
+      if (groups.length && (!n.m || n.mv !== st.map.ver)) { n.m = S.matchTip(n.crop, groups); n.mv = st.map.ver; }   // matching is slow: redo only when the map changes
+      const m = groups.length ? n.m : null;
       if (!m || !m.clear) { loose.push(n); continue; }
       const r = rows[m.i];
       if (m.d < r.d) { r.name = n.name; r.d = m.d; r.src = "hover"; r.redUntradable = n.untr.red === true; }
@@ -124,12 +127,13 @@
     list.replaceChildren();
     const order = sellRows.slice().sort((a, b) => (a.name ? 1 : 0) - (b.name ? 1 : 0) || a.g.slots[0][0] - b.g.slots[0][0] || a.g.slots[0][1] - b.g.slots[0][1]);
     for (const r of order) {
-      const input = el("input", { class: "in", value: r.name || "", placeholder: "Not named yet: hover it in game, or type its name", "aria-label": "Item name" });
+      const input = el("input", { class: "in", value: r.name || "", placeholder: res.loose.length ? "Not named yet: pick one of the names read below, or hover it again" : "Not named yet: hover it in game, or type its name", "aria-label": "Item name", list: "scanLoose" });
       input.addEventListener("change", () => { const v = input.value.trim(); input.blur(); const m = st.manual.find((x) => S.dist(x.fp, r.g.fp) <= S.SAME); if (m) m.name = v; else st.manual.push({ fp: r.g.fp, name: v }); st.dirty = true; renderScan(); });
       list.append(el("div", { class: "scan-item" + (r.name ? "" : " todo") }, el("img", { class: "ico", src: thumbUrl(r.g.thumb), alt: "" }), input,
         el("span", { class: "q", text: "×" + r.g.red }), el("span", { class: "sub", text: (r.redUntradable ? "reads as untradable" : "") + (r.g.purple ? (r.redUntradable ? " · " : "") + "+" + r.g.purple + " worn" : "") })));
     }
-    if (res.loose.length) list.append(el("div", { class: "scan-note", text: "Read but not yet found in the mapped rows: " + res.loose.map((n) => n.name).join(", ") + ". Scroll through the rest of the inventory with nothing hovered." }));
+    const dl = $("#scanLoose"); dl.replaceChildren(); for (const n of res.loose) dl.append(el("option", { value: n.name }));
+    if (res.loose.length) list.append(el("div", { class: "scan-note", text: "Names read, but I couldn't tell which inventory icon each belongs to: " + res.loose.map((n) => n.name).join(", ") + ". If some rows were never shown with nothing hovered, scroll through them now. Otherwise click an unnamed row above and pick its name from the list." }));
     if (!order.length && !res.loose.length) list.append(el("div", { class: "scan-note", text: "Nothing scanned yet." }));
     const b = $("#scanApply"); b.disabled = !sellRows.length; b.textContent = "Sync portfolio to this scan"; st.armed = 0;
   }
@@ -168,7 +172,7 @@
     c.globalAlpha = 1; c.fillStyle = "#3a3a3a"; c.fillRect(0, 0, cv.width, cv.height);
     c.globalAlpha = 0.68; c.drawImage(fc, x1, y1, w, h, 0, 0, cv.width, cv.height); c.globalAlpha = 1;
     c.lineWidth = 2 * dpr;
-    st.lastTips.forEach((t, i) => { c.strokeStyle = i === 0 ? "#2fae68" : "rgba(160,160,160,.5)"; c.strokeRect((t.name.x - x1) * z, (t.name.y - y1) * z, t.name.w * z, t.name.h * z); if (i === 0) c.strokeRect((t.box.x - x1) * z, (t.box.y - y1) * z, t.box.w * z, t.box.h * z); });
+    st.lastTips.forEach((t, i) => { c.strokeStyle = i === 0 ? "#2fae68" : "rgba(160,160,160,.5)"; c.strokeRect((t.name.x - x1) * z, (t.name.y - y1) * z, t.name.w * z, t.name.h * z); if (t.name2) c.strokeRect((t.name2.x - x1) * z, (t.name2.y - y1) * z, t.name2.w * z, t.name2.h * z); if (i === 0) c.strokeRect((t.box.x - x1) * z, (t.box.y - y1) * z, t.box.w * z, t.box.h * z); });
   }
 
   /* ---------- frame sources ---------- */
@@ -264,5 +268,11 @@
     st.armed = 0; b.textContent = "Sync portfolio to this scan"; applyScan();
   });
   $("#scanUndo").addEventListener("click", () => { if (!st.undo) return; pf.holdings = st.undo; st.undo = null; sel = null; changed(); $("#scanUndo").hidden = true; $("#scanMsg").textContent = "Put your portfolio back the way it was before the sync."; });
+  $("#scanCopy").addEventListener("click", async () => {
+    const res = st.res || results(), f1 = (x) => (x == null || !isFinite(x) ? null : +x.toFixed(1));
+    const text = JSON.stringify({ scale: f1(st.s * 100) / 100, frame: st.frame, grid: st.grid && [Math.round(st.grid.x0), Math.round(st.grid.y0)], rows: st.map.rows.length, filled: st.map.filled(), kinds: res.rows.length, named: st.named.length,
+      unmatched: res.loose.map((n) => ({ name: n.name, d: n.m && f1(n.m.d), second: n.m && f1(n.m.second), shift: n.m && [n.m.dx, n.m.dy], nearest: n.m && res.rows[n.m.i] ? res.rows[n.m.i].g.slots[0] : null })) });
+    try { await navigator.clipboard.writeText(text); $("#scanMsg").textContent = "Copied the scan details. Paste them into your Claude chat."; } catch (e) { $("#scanMsg").textContent = text; }
+  });
   window.KSBScanUI = { st, onFrame, results, applyScan, loadBook };
 })();

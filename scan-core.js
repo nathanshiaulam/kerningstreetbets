@@ -157,7 +157,7 @@
   function findTips(img, s) {
     const W = img.width, H = img.height, d = img.data, seen = new Uint8Array(W * H), tips = [];
     const cyan = (k) => d[k + 2] > 230 && Math.abs(d[k] - 85) < 30 && Math.abs(d[k + 1] - 204) < 30;
-    const lo = Math.max(3, 3.3 * s), hi = Math.max(6, 6.2 * s), stack = [];
+    const lo = Math.max(3, 3.3 * s), hi = Math.max(6, 6.2 * s), stack = [], dots = [];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const p = y * W + x;
       if (seen[p] || !cyan(p * 4)) continue;
@@ -173,13 +173,18 @@
       }
       const w = x2 - x1 + 1, h = y2 - y1 + 1;
       if (w < lo || h < lo || w > hi || h > hi || Math.abs(w - h) > Math.max(2, s) || area < 0.45 * w * h) continue;
-      const tip = nameLine(img, s, x1, y1, w, h);
+      dots.push({ x: x1, y: y1, w, h });
+    }
+    for (const d of dots) {
+      let stop = W;                                   // the next tooltip's dot on the same line ends this name
+      for (const o of dots) if (o !== d && o.x > d.x + d.w && Math.abs(o.y - d.y) < 9 * s && o.x - 2 * s < stop) stop = Math.round(o.x - 2 * s);
+      const tip = nameLine(img, s, d.x, d.y, d.w, d.h, stop);
       if (tip) tips.push(tip);
     }
     tips.sort((a, b) => a.dot.x - b.dot.x);
     return tips;
   }
-  function nameLine(img, s, x, y, w, h) {
+  function nameLine(img, s, x, y, w, h, stop) {
     const W = img.width, H = img.height, d = img.data, cy = y + h / 2;
     const y1 = Math.max(0, Math.round(cy - 6.5 * s)), y2 = Math.min(H, Math.round(cy + 9 * s));
     const white = (px, py) => { const k = (py * W + px) * 4; return d[k] >= 200 && d[k + 1] >= 200 && d[k + 2] >= 200; };
@@ -188,9 +193,12 @@
     if (!dark(x - 2 * s, cy) || !dark(x + w / 2, y - 2 * s) || !dark(x + w / 2, y + h + 2 * s)) return null;
     const xs = Math.round(x + w + 1.5 * s), maxGap = 12 * s;
     let last = -1, gap = 0, count = 0, darkN = 0, darkAt = 0, countAt = 0;
-    for (let px = xs; px < W && gap < maxGap; px++) {
+    const lim = Math.min(W, stop || W);
+    for (let px = xs; px < lim && gap < maxGap; px++) {
       let any = false;
-      for (let py = y1; py < y2; py++) { if (white(px, py)) { any = true; count++; } else if (dark(px, py)) darkN++; }
+      let col = 0;
+      for (let py = y1; py < y2; py++) { if (white(px, py)) { any = true; count++; col++; } else if (dark(px, py)) darkN++; }
+      if (col >= (y2 - y1) * 0.9) { count -= col; break; }
       if (any) { last = px; gap = 0; darkAt = darkN; countAt = count; } else gap++;
     }
     if (last < 0 || last - xs < 10 * s || count < 25 * s * s) return null;
@@ -198,34 +206,39 @@
     if (countAt > area * 0.5 || darkAt < area * 0.4) return null;
     const first = (() => { for (let px = xs; px <= last; px++) for (let py = y1; py < y2; py++) if (white(px, py)) return px; return xs; })();
     if (first - xs > 6 * s) return null;                       // the text must start right after the dot
-    // "Untradable" is one orange line between the name and the icon, to the right of where the icon would be.
-    let orange = 0;
-    const ox1 = Math.round(x + 72 * s), ox2 = Math.min(W, Math.round(x + 150 * s)), oy1 = Math.round(cy + 10 * s), oy2 = Math.min(H, Math.round(cy + 20.5 * s));
-    for (let py = oy1; py < oy2; py++) for (let px = ox1; px < ox2; px++) {
-      const k = (py * W + px) * 4;
-      if (d[k] > 190 && Math.abs(d[k + 1] - 150) < 35 && d[k + 2] < 60) orange++;
-    }
-    const untradable = orange > 18 * s * s;
-    const box = { x: x + 1 * s, y: cy + (untradable ? 29.6 : 15.2) * s, w: 67.2 * s, h: 67.2 * s };
-    // Below the name there must be the pale square that holds the icon. Check its corners where it should be;
-    // if it is not there (extra lines between name and icon), look for its top edge further down.
-    const paleAt = (px, py) => { if (px < 0 || py < 0 || px >= W || py >= H) return false; const k = (Math.round(py) * W + Math.round(px)) * 4; return Math.abs(d[k] - TIP_BG[0]) < 45 && Math.abs(d[k + 1] - TIP_BG[1]) < 45 && Math.abs(d[k + 2] - TIP_BG[2]) < 45; };
-    const corners = (by) => { let n = 0; for (const [fx, fy] of [[0.06, 0.06], [0.94, 0.06], [0.06, 0.94], [0.5, 0.04]]) if (paleAt(box.x + box.w * fx, by + box.h * fy)) n++; return n; };
+    // Between the name and the pale icon square there can be extra lines: the rest of a long name that
+    // wrapped, and an orange "Untradable". Find where the square really starts and classify each line.
+    const LINE = 14.4, BOX0 = 15.2;
+    const box = { x: x + 1 * s, y: cy + BOX0 * s, w: 67.2 * s, h: 67.2 * s };
+    const paleAt = (px, py) => { if (px < 0 || py < 0 || px >= W || py >= H) return false; const k = (Math.round(py) * W + Math.round(px)) * 4; return Math.abs(d[k] - TIP_BG[0]) < 26 && Math.abs(d[k + 1] - TIP_BG[1]) < 26 && Math.abs(d[k + 2] - TIP_BG[2]) < 26; };
     const rowPale = (py) => { let n = 0; for (let i = 0; i < 12; i++) if (paleAt(box.x + box.w * (0.05 + 0.9 * i / 11), py)) n++; return n / 12; };
-    const fits = box.y + box.h <= H && box.x + box.w <= W;
-    if (fits && corners(box.y) < 2) {
-      let found = false;
-      for (let py = Math.round(cy + 11 * s); py < cy + 70 * s && py + box.h <= H; py++) {
-        if (rowPale(py) >= 0.7 && rowPale(py - 2 * s) <= 0.25 && corners(py - 1.5 * s) >= 2) { box.y = py - 1.5 * s; found = true; break; }
+    let top = null;
+    for (let py = Math.round(cy + 11 * s); py < cy + (BOX0 + LINE * 3.3) * s && py < H - 2; py++) if (rowPale(py) >= 0.45 && rowPale(py - 2 * s) <= 0.2) { top = py; break; }   // an icon can cover half of the square's top edge
+    if (top == null) { if (box.y + box.h * 0.5 < H) return null; }     // no icon square under the name: not a tooltip (unless it runs off the picture)
+    else box.y = top;
+    const extra = top == null ? 0 : Math.max(0, Math.round((top - (cy + BOX0 * s)) / (LINE * s)));
+    let untradable = false, name2 = null;
+    for (let k = 0; k < extra; k++) {
+      const ya = Math.round(cy + (9 + LINE * k) * s), yb = Math.min(H, Math.round(cy + (22.5 + LINE * k) * s)), xa = Math.max(0, Math.round(x - 2 * s)), xb = Math.min(lim, Math.round(x + 232 * s));
+      let orange = 0, wn = 0, wx1 = -1, wx2 = -1;
+      let gapN = 0, done = false;
+      for (let px = xa; px < xb; px++) {
+        let col = 0, org = 0;
+        for (let py = ya; py < yb; py++) { const q = (py * W + px) * 4; if (d[q] > 190 && Math.abs(d[q + 1] - 150) < 35 && d[q + 2] < 60) org++; else if (d[q] >= 200 && d[q + 1] >= 200 && d[q + 2] >= 200) col++; }
+        orange += org;
+        if (done) continue;
+        if (col >= (yb - ya) * 0.9) { if (wx1 >= 0) done = true; continue; }      // border line, not text
+        if (col) { if (wx1 < 0) wx1 = px; wx2 = px; wn += col; gapN = 0; } else if (wx1 >= 0 && ++gapN > maxGap) done = true;
       }
-      if (!found) return null;
+      if (orange > 18 * s * s) untradable = true;
+      else if (wn > 20 * s * s && !name2) name2 = { x: wx1 - 2, y: ya, w: wx2 - wx1 + 5, h: yb - ya };
     }
-    return { dot: { x, y, w, h, cy }, name: { x: first - 2, y: y1, w: last - first + 5, h: y2 - y1 }, untradable, box, cut: box.y + box.h > H || box.x + box.w > W };
+    return { dot: { x, y, w, h, cy }, name: { x: first - 2, y: y1, w: last - first + 5, h: y2 - y1 }, name2, untradable, box, cut: box.y + box.h > H || box.x + box.w > W };
   }
   // The tooltip shows the item's icon at twice the size. Keep a small copy of that box so the icon can be
   // matched against inventory slots later, whenever the map is ready.
   function tipCrop(img, tip, s) {
-    const m = Math.ceil(5 * s), b = tip.box, x = Math.max(0, Math.floor(b.x) - m), y = Math.max(0, Math.floor(b.y) - m);
+    const m = Math.ceil(11 * s), b = tip.box, x = Math.max(0, Math.floor(b.x) - m), y = Math.max(0, Math.floor(b.y) - m);
     const w = Math.min(img.width - x, Math.ceil(b.w) + 2 * m), h = Math.min(img.height - y, Math.ceil(b.h) + 2 * m);
     const data = new Uint8ClampedArray(w * h * 4);
     for (let r = 0; r < h; r++) data.set(img.data.subarray(((y + r) * img.width + x) * 4, ((y + r) * img.width + x + w) * 4), r * w * 4);
@@ -236,8 +249,8 @@
     return { fp: relBg(raw, TIP_BG), badge: badgeOf(raw) };
   }
   // Greyscale crop of the name, dark text on white, enlarged for the text reader.
-  function nameImage(img, tip, scale) {
-    const r = tip.name, W = img.width, d = img.data, k = scale || 3, pad = 12;
+  function nameImage(img, tip, scale, second) {
+    const r = second ? tip.name2 : tip.name, W = img.width, d = img.data, k = scale || 3, pad = 12;
     const w = Math.max(1, Math.round(r.w)), h = Math.max(1, Math.round(r.h)), ow = w * k + pad * 2, oh = h * k + pad * 2;
     const src = new Float32Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -267,7 +280,7 @@
   }
   const bits = (m) => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
   class InvMap {
-    constructor() { this.rows = []; this.offset = 0; this.lost = false; this.tick = 0; }
+    constructor() { this.rows = []; this.offset = 0; this.lost = false; this.tick = 0; this.ver = 0; }
     // Place a clean six-row view. `pages` = true means views may arrive a whole page apart (screenshots).
     add(view, pages) {
       this.tick++;
@@ -295,8 +308,9 @@
       let off = best.off, added = 0;
       const blank = () => Array.from({ length: COLS }, () => ({ cur: null, alts: [] }));
       if (off < 0) { const n = -off; this.rows = Array.from({ length: n }, blank).concat(this.rows); added += n; off = 0; }
+      if (added) this.ver++;
       for (let r = 0; r < ROWS; r++) {
-        if (off + r >= this.rows.length) { this.rows.push(blank()); added++; }
+        if (off + r >= this.rows.length) { this.rows.push(blank()); added++; this.ver++; }
         for (let c = 0; c < COLS; c++) this.put(this.rows[off + r][c], view[r][c], r);
       }
       this.offset = off;
@@ -309,6 +323,7 @@
       if (v) { v.mask |= 1 << r; v.t = this.tick; v.slot = slot; } else cell.alts.push((v = { slot, mask: 1 << r, t: this.tick }));
       let top = cell.alts[0];
       for (const a of cell.alts) if (bits(a.mask) > bits(top.mask) || (bits(a.mask) === bits(top.mask) && a.t > top.t)) top = a;
+      if (!cell.cur || !slotSame(cell.cur, top.slot)) this.ver++;
       cell.cur = top.slot;
     }
     // Rows that hold at least one item.
@@ -326,17 +341,22 @@
       return gs;
     }
   }
-  // Best group for a saved tooltip icon, trying small shifts because the icon lands on slightly
-  // different sub-pixels each time. Returns null unless the match is clear.
+  // Best group for a saved tooltip icon. The tooltip draws a different cut of the icon than the slot does,
+  // offset by a few pixels that vary from item to item, so search a wide range of shifts coarsely and
+  // then finely around the best one. Returns clear = false unless one group stands out.
   function matchTip(crop, groups) {
-    let d = Infinity, i = -1; const per = new Float32Array(groups.length).fill(Infinity);
-    for (let dy = -1.5; dy <= 1.5; dy += 0.5) for (let dx = -1.5; dx <= 1.5; dx += 0.5) {
+    const per = new Float32Array(groups.length).fill(Infinity); let bd = Infinity, bx = 0, by = 0;
+    const tryAt = (dx, dy) => {
       const t = tipFp(crop, dx, dy).fp;
-      for (let k = 0; k < groups.length; k++) { const dd = dist(t, groups[k].fp); if (dd < per[k]) per[k] = dd; }
-    }
+      for (let k = 0; k < groups.length; k++) { const dd = dist(t, groups[k].fp); if (dd < per[k]) per[k] = dd; if (dd < bd) { bd = dd; bx = dx; by = dy; } }
+    };
+    for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) tryAt(dx, dy);
+    const cx = bx, cy = by;
+    for (let dy = -0.5; dy <= 0.5; dy += 0.5) for (let dx = -0.5; dx <= 0.5; dx += 0.5) if (dx || dy) tryAt(cx + dx, cy + dy);
+    let d = Infinity, i = -1;
     for (let k = 0; k < per.length; k++) if (per[k] < d) { d = per[k]; i = k; }
     let second = Infinity; for (let k = 0; k < per.length; k++) if (k !== i && per[k] < second) second = per[k];
-    return { i, d, second, clear: i >= 0 && d <= TIP_MAX && second >= d * TIP_RATIO };
+    return { i, d, second, dx: bx, dy: by, clear: i >= 0 && d <= TIP_MAX && second >= d * TIP_RATIO };
   }
   // Distance between two saved tooltip icons (same item hovered twice gives a small number).
   function tipDist(a, b) {

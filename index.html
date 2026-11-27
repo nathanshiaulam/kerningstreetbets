@@ -259,9 +259,11 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
       <div class="scan-right">
         <div class="scan-counts" id="scanCounts"></div>
         <div class="scan-list" id="scanList"></div>
+        <datalist id="scanLoose"></datalist>
         <div class="line">
           <button class="btn pri" id="scanApply" disabled>Sync portfolio to this scan</button>
           <button class="btn" id="scanUndo" hidden>Undo sync</button>
+          <button class="btn ghost" id="scanCopy">Copy scan details</button>
         </div>
         <div class="msg" id="scanMsg" role="status"></div>
       </div>

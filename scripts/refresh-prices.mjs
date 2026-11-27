@@ -54,7 +54,7 @@ try {
     // the middle half of sale prices, the sale median, the share of listings that sold, and sales a day.
     if (it.p25 > 0 && it.p75 > 0) e.q = [Math.round(it.p25), Math.round(it.p75)];
     e.sp = Math.round(it.p);
-    if (it.st != null) e.st = it.st;
+    if (it.st != null && it.asks > 0) e.st = it.st; else delete e.st;   // with no listings on record the share is meaningless
     const days = (it.h || []).filter((r) => Array.isArray(r) && r[2] > 0).slice(0, -1).slice(-7);   // the newest day is still filling in
     if (days.length) e.v = Math.round((days.reduce((a, r) => a + r[2], 0) / days.length) * 10) / 10;
     const held = e.t && now - new Date(e.t) < HOLD_MS, heldTag = held ? tag(e.t) : null;

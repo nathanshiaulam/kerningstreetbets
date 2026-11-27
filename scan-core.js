@@ -394,6 +394,46 @@
     return d;
   }
 
+  /* ---------- naming from the icon dictionary ---------- */
+  // data/icons.json holds a half-resolution colour signature of every cash item's icon. A slot picture is
+  // compared with each signature laid over the slot background, at the few positions an icon of that size
+  // can sit (centred, resting near the bottom). The badge and the stack number are left out.
+  function prepIcons(json, catalog) {
+    const out = [], items = (json && json.items) || {};
+    for (const slug in items) {
+      const v = items[slug], bin = typeof atob === "function" ? atob(v.d) : Buffer.from(v.d, "base64").toString("binary"), d = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) d[i] = bin.charCodeAt(i);
+      let wt = 0; for (let i = 3; i < d.length; i += 4) wt += d[i] > 127 ? 3 : 0.6;
+      out.push({ slug, name: catalog && catalog[slug] ? catalog[slug].n : slug, w: v.w, h: v.h, cw: Math.ceil(v.w / 2), ch: Math.ceil(v.h / 2), d, wt });
+    }
+    return out;
+  }
+  function iconAt(th, sg, ox, oy, lim) {
+    let tot = 0, wt = 0; const cap = lim * sg.wt;       // once the running total passes this, the result cannot beat `lim`
+    for (let j = 0; j < sg.ch; j++) { if (tot > cap) return 1e9; for (let i = 0; i < sg.cw; i++) {
+      const x = ox + 2 * i, y = oy + 2 * j;
+      if (x < 0 || y < 0 || x > 30 || y > 30 || (x >= 18 && y >= 18) || (x <= 9 && y >= 21)) continue;
+      const o = (j * sg.cw + i) * 4, a = sg.d[o + 3] / 255, w = a > 0.5 ? 1 : 0.2, q = (y * 32 + x) * 3;
+      const r = (th[q] + th[q + 3] + th[q + 96] + th[q + 99]) / 4, g = (th[q + 1] + th[q + 4] + th[q + 97] + th[q + 100]) / 4, b = (th[q + 2] + th[q + 5] + th[q + 98] + th[q + 101]) / 4;
+      tot += w * (Math.abs(r - (sg.d[o] + (1 - a) * SLOT_BG[0])) + Math.abs(g - (sg.d[o + 1] + (1 - a) * SLOT_BG[1])) + Math.abs(b - (sg.d[o + 2] + (1 - a) * SLOT_BG[2]))); wt += w * 3;
+    } }
+    return wt > 40 ? tot / wt : 1e9;
+  }
+  // Returns the best and second-best dictionary entries for a 32 x 32 slot picture. `sure` means the best
+  // is close and clearly ahead; `twin` names a near-identical runner-up (some items share an icon).
+  function matchIcon(th, sigs) {
+    let b1 = { d: 1e9, i: -1 }, b2 = { d: 1e9, i: -1 };
+    for (let k = 0; k < sigs.length; k++) {
+      // Most icons rest near the bottom of the slot; short and tall ones sit nearer the middle. Try both and between.
+      const sg = sigs[k], cx = Math.round((32 - sg.w) / 2), by = 32 - sg.h - 1, cy = Math.round((32 - sg.h) / 2); let d = 1e9;
+      for (let oy = Math.min(by, cy) - 2; oy <= Math.max(by, cy) + 2; oy++) for (let ox = cx - 3; ox <= cx + 3; ox++) { const v = iconAt(th, sg, ox, oy, Math.min(d, b2.d)); if (v < d) d = v; }
+      if (d < b1.d) { b2 = b1; b1 = { d, i: k }; } else if (d < b2.d) b2 = { d, i: k };
+    }
+    if (b1.i < 0) return null;
+    const near = b2.i >= 0 && b2.d < Math.max(b1.d * 1.3, b1.d + 6);
+    return { slug: sigs[b1.i].slug, name: sigs[b1.i].name, d: b1.d, second: b2.d, sure: b1.d <= 26 && !near, twin: b1.d <= 26 && near ? sigs[b2.i].name : null };
+  }
+
   /* ---------- names ---------- */
   function cleanName(t) { return String(t || "").replace(/[|_~`^]/g, "").replace(/\s+/g, " ").replace(/^[^A-Za-z0-9(]+|[^A-Za-z0-9)!?.']+$/g, "").trim(); }
   function lev(a, b) {
@@ -410,5 +450,5 @@
     return read;
   }
 
-  return { COLS, ROWS, N, SAME, sample, findGrid, slotRect, gridRect, readSlots, thumbFp, dist, badgeOf, findTips, tipCrop, tipFp, tipDist, nameImage, InvMap, sameView, matchTip, cleanName, snapName, lev };
+  return { COLS, ROWS, N, SAME, sample, findGrid, slotRect, gridRect, readSlots, thumbFp, dist, badgeOf, findTips, tipCrop, tipFp, tipDist, nameImage, InvMap, sameView, matchTip, prepIcons, matchIcon, cleanName, snapName, lev };
 });

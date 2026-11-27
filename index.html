@@ -248,8 +248,8 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
         <canvas id="scanPreview" width="10" height="10" aria-label="What the scanner sees"></canvas>
         <ol class="scan-steps">
           <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row, a notch at a time. The pointer can be over the items. A soft tick means new rows were added.</li>
-          <li><b>Hover.</b> Hover each different item once. A rising two-tone beep means a new name was read. A low beep means it was already known.</li>
-          <li><b>Sync.</b> Check the list, then sync. Copies are counted for you, so one hover per kind of item is enough, and names you have already synced are remembered next time.</li>
+          <li><b>Check.</b> Items are named from their icons as rows appear. Hover only the ones left unnamed, or any that look wrong: a hover always wins.</li>
+          <li><b>Sync.</b> When the list looks right, sync. Copies are counted for you.</li>
         </ol>
         <div class="line">
           <label class="check"><input type="checkbox" id="scanSound" checked> Sounds</label>
@@ -291,7 +291,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
   <div class="two pf-only">
     <section class="panel card" aria-label="Scan and backup">
       <h3>Scan inventory</h3>
-      <p>Share your MapleStory window, scroll through the Deco tab once, then hover each different item. Only unworn items (red badge) are counted. The picture is read in this browser and is never uploaded.</p>
+      <p>Share your MapleStory window and scroll through the Deco tab once. Items are named from their icons; hover only the few it can't name. Only unworn items (red badge) are counted. The picture is read in this browser and is never uploaded.</p>
       <div class="line">
         <button class="btn pri" id="scanBtn">Share MapleStory window</button>
         <label class="btn" for="scanFiles" style="cursor:pointer">Use screenshots</label>
@@ -616,7 +616,7 @@ $("#copyBtn").addEventListener("click", async () => {
 });
 
 /* ---------- update and reset ---------- */
-const BUILD = "2026-11-26 20:25 PT";
+const BUILD = "2026-11-26 21:05 PT";
 async function freshReload() {
   // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
   const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];

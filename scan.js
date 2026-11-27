@@ -6,7 +6,7 @@
 (function () {
   "use strict";
   const S = window.KSBScan;
-  const st = { on: false, stream: null, track: null, video: null, timer: null, s: null, grid: null, sawOpenGrid: false, map: new S.InvMap(), named: [], manual: [], book: [], hover: null, lastRows: null, busy: false, ocr: null, ocrLoading: null, dirty: true, undo: null, ac: null, lastTick: 0, lastTips: [], frame: null, res: null, armed: 0 };
+  const st = { on: false, stream: null, track: null, video: null, timer: null, s: null, grid: null, sawOpenGrid: false, map: new S.InvMap(), named: [], manual: [], book: [], sigs: null, sigsLoading: null, dbCache: [], pending: 0, hover: null, lastRows: null, busy: false, ocr: null, ocrLoading: null, dirty: true, undo: null, ac: null, lastTick: 0, lastTips: [], frame: null, res: null, armed: 0 };
   const TIP_SAME = 14;   // two tooltip icons this close are the same item
   const here = (p) => new URL(p, document.baseURI).href;
   const fc = document.createElement("canvas"), fx = fc.getContext("2d", { willReadFrequently: true });
@@ -53,6 +53,22 @@
       try { const im = new Image(); im.src = h.icon; await im.decode(); x.clearRect(0, 0, 32, 32); x.drawImage(im, 0, 0, 32, 32); out.push({ fp: S.thumbFp(x.getImageData(0, 0, 32, 32).data), name: h.name }); } catch (e) {}
     }
     st.book = out; st.dirty = true;
+  }
+
+  // The icon dictionary: a signature of every cash item's icon, so most items are named without a hover.
+  function loadIcons() {
+    if (!st.sigsLoading) st.sigsLoading = fetch("data/icons.json").then((r) => (r.ok ? r.json() : null)).then((j) => { st.sigs = j ? S.prepIcons(j, catalog) : []; st.dirty = true; }).catch(() => { st.sigs = []; });
+    return st.sigsLoading;
+  }
+  // Look a slot picture up in the dictionary, remembering the answer. At most `budget` new look-ups per call,
+  // because each one compares against every icon; the rest are done on the next pass.
+  function dbName(g, budget) {
+    if (!st.sigs || !st.sigs.length || !g.thumb) return null;
+    for (const e of st.dbCache) if (S.dist(e.fp, g.fp) <= 4) return e.m;
+    if (budget.n <= 0) { st.pending++; return null; }
+    budget.n--;
+    const m = S.matchIcon(g.thumb, st.sigs); st.dbCache.push({ fp: g.fp, m });
+    return m;
   }
 
   /* ---------- one frame ---------- */
@@ -104,19 +120,21 @@
   }
 
   /* ---------- results ---------- */
-  function results() {
+  function results(opts) {
     const groups = st.map.groups();
-    const rows = groups.map((g) => ({ g, name: null, d: Infinity, src: null, redUntradable: false }));
-    for (const r of rows) { let best = null; for (const bk of st.book) { const d = S.dist(bk.fp, r.g.fp); if (d <= S.SAME && (!best || d < best.d)) best = { d, bk }; } if (best) { r.name = best.bk.name; r.src = "book"; } }
+    const rows = groups.map((g) => ({ g, name: null, slug: null, hint: null, d: Infinity, src: null, redUntradable: false }));
+    const budget = { n: opts && opts.all ? 1e9 : 3 }; st.pending = 0;
+    for (const r of rows) { const m = r.g.red ? dbName(r.g, budget) : null; if (m && m.sure) { r.name = m.name; r.slug = m.slug; r.src = "dictionary"; } else if (m && m.twin) r.hint = m.name + " or " + m.twin; }
+    for (const r of rows) { let best = null; for (const bk of st.book) { const d = S.dist(bk.fp, r.g.fp); if (d <= S.SAME && (!best || d < best.d)) best = { d, bk }; } if (best) { r.name = best.bk.name; r.slug = null; r.src = "book"; } }
     const loose = [];
     for (const n of st.named) {
       if (groups.length && (!n.m || n.mv !== st.map.ver)) { n.m = S.matchTip(n.crop, groups); n.mv = st.map.ver; }   // matching is slow: redo only when the map changes
       const m = groups.length ? n.m : null;
       if (!m || !m.clear) { loose.push(n); continue; }
       const r = rows[m.i];
-      if (m.d < r.d) { r.name = n.name; r.d = m.d; r.src = "hover"; r.redUntradable = n.untr.red === true; }
+      if (m.d < r.d) { r.name = n.name; r.slug = null; r.d = m.d; r.src = "hover"; r.redUntradable = n.untr.red === true; }
     }
-    for (const mn of st.manual) { let best = null; rows.forEach((r) => { const d = S.dist(mn.fp, r.g.fp); if (d <= S.SAME && (!best || d < best.d)) best = { r, d }; }); if (best) best.r.name = mn.name || null; }
+    for (const mn of st.manual) { let best = null; rows.forEach((r) => { const d = S.dist(mn.fp, r.g.fp); if (d <= S.SAME && (!best || d < best.d)) best = { r, d }; }); if (best) { best.r.name = mn.name || null; best.r.slug = null; best.r.src = "typed"; } }
     return { rows, loose, red: rows.reduce((a, r) => a + r.g.red, 0), purple: rows.reduce((a, r) => a + r.g.purple, 0) };
   }
   function renderScan() {
@@ -125,28 +143,29 @@
     st.dirty = false;
     const res = (st.res = results()), sellRows = res.rows.filter((r) => r.g.red > 0), named = sellRows.filter((r) => r.name).length;
     $("#scanCounts").textContent = st.map.rows.length
-      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.unseen() ? " · " + st.map.unseen() + " slots not seen clearly yet (move the pointer off them)" : "")
+      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.unseen() ? " · " + st.map.unseen() + " slots not seen clearly yet (move the pointer off them)" : "") + (st.pending ? " · naming " + st.pending + " more…" : "")
       : st.named.length ? st.named.length + " names read. Scroll through the inventory with no item hovered so the items can be counted." : "";
     list.replaceChildren();
     const order = sellRows.slice().sort((a, b) => (a.name ? 1 : 0) - (b.name ? 1 : 0) || a.g.slots[0][0] - b.g.slots[0][0] || a.g.slots[0][1] - b.g.slots[0][1]);
     for (const r of order) {
-      const input = el("input", { class: "in", value: r.name || "", placeholder: res.loose.length ? "Not named yet: pick one of the names read below, or hover it again" : "Not named yet: hover it in game, or type its name", "aria-label": "Item name", list: "scanLoose" });
+      const input = el("input", { class: "in", value: r.name || "", placeholder: r.hint ? r.hint + ": these look the same, hover it to settle" : res.loose.length ? "Not named yet: pick one of the names read below, or hover it again" : "Not named yet: hover it in game, or type its name", "aria-label": "Item name", list: "scanLoose" });
       input.addEventListener("change", () => { const v = input.value.trim(); input.blur(); const m = st.manual.find((x) => S.dist(x.fp, r.g.fp) <= S.SAME); if (m) m.name = v; else st.manual.push({ fp: r.g.fp, name: v }); st.dirty = true; renderScan(); });
       list.append(el("div", { class: "scan-item" + (r.name ? "" : " todo") }, el("img", { class: "ico", src: thumbUrl(r.g.thumb), alt: "" }), input,
-        el("span", { class: "q", text: "×" + r.g.red }), el("span", { class: "sub", text: (r.redUntradable ? "reads as untradable" : "") + (r.g.purple ? (r.redUntradable ? " · " : "") + "+" + r.g.purple + " worn" : "") })));
+        el("span", { class: "q", text: "×" + r.g.red }), el("span", { class: "sub", text: (r.src === "dictionary" ? "auto " : "") + (r.redUntradable ? "reads as untradable" : "") + (r.g.purple ? (r.redUntradable ? " · " : "") + "+" + r.g.purple + " worn" : "") })));
     }
     const dl = $("#scanLoose"); dl.replaceChildren(); for (const n of res.loose) dl.append(el("option", { value: n.name }));
     if (res.loose.length) list.append(el("div", { class: "scan-note", text: "Names read, but I couldn't tell which inventory icon each belongs to: " + res.loose.map((n) => n.name).join(", ") + ". If some rows were never shown with nothing hovered, scroll through them now. Otherwise click an unnamed row above and pick its name from the list." }));
     if (!order.length && !res.loose.length) list.append(el("div", { class: "scan-note", text: "Nothing scanned yet." }));
     const b = $("#scanApply"); b.disabled = !sellRows.length; b.textContent = "Sync portfolio to this scan"; st.armed = 0;
+    if (st.pending && !st.pendTimer) st.pendTimer = setTimeout(() => { st.pendTimer = 0; renderScan(); }, 40);   // more dictionary look-ups to do
   }
   function applyScan() {
-    const res = results(), out = [], by = new Map();
+    const res = results({ all: true }), out = [], by = new Map();
     for (const r of res.rows) {
       if (!r.g.red || r.redUntradable) continue;
       const icon = thumbUrl(r.g.thumb);
       if (!r.name) { out.push({ id: uid(), slug: null, name: "Unnamed item", qty: r.g.red, ok: false, icon }); continue; }
-      const hit = Object.keys(catalog).find((s) => catalog[s].n.toLowerCase() === r.name.toLowerCase()), slug = hit || slugify(r.name);
+      const hit = r.slug && catalog[r.slug] ? r.slug : Object.keys(catalog).find((s) => catalog[s].n.toLowerCase() === r.name.toLowerCase()), slug = hit || slugify(r.name);
       if (by.has(slug)) { by.get(slug).qty += r.g.red; continue; }
       const old = pf.holdings.find((h) => h.slug === slug), row = { id: old ? old.id : uid(), slug, name: hit ? catalog[hit].n : r.name, qty: r.g.red, ok: true, icon };
       by.set(slug, row); out.push(row);
@@ -232,7 +251,7 @@
     setButtons(); renderScan();
   }
   function reset() {
-    st.map = new S.InvMap(); st.named = []; st.manual = []; st.hover = null; st.lastRows = null; st.grid = null; st.sawOpenGrid = false; st.dirty = true;
+    st.map = new S.InvMap(); st.named = []; st.manual = []; st.dbCache = []; st.hover = null; st.lastRows = null; st.grid = null; st.sawOpenGrid = false; st.dirty = true;
     $("#scanMsg").textContent = ""; say(st.on ? "Scan cleared. Looking for your item inventory…" : "Scan cleared."); renderScan();
   }
   async function fromFiles(files) {
@@ -251,7 +270,7 @@
     } catch (e) { console.error(e); say("One of those files couldn't be read as a picture."); }
     st.busy = false; renderScan();
   }
-  function openPanel() { const p = $("#scanPanel"); if (p.hidden) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "start" }); } setButtons(); renderScan(); loadBook().then(renderScan); }
+  function openPanel() { const p = $("#scanPanel"); if (p.hidden) { p.hidden = false; p.scrollIntoView({ behavior: "smooth", block: "start" }); } setButtons(); renderScan(); loadBook().then(renderScan); loadIcons().then(renderScan); }
   function setButtons() {
     $("#scanStop").hidden = !st.on; $("#scanAgain").hidden = st.on;
     for (const id of ["#scanBtn", "#scanTop"]) { const b = $(id); b.disabled = st.on; b.textContent = st.on ? "Sharing…" : id === "#scanTop" ? "Scan inventory" : "Share MapleStory window"; }

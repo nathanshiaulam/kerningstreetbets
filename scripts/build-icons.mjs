@@ -43,8 +43,11 @@ if (process.argv[1] && process.argv[1].endsWith("build-icons.mjs")) {
       if (icons.items[slug]) { log.skipped++; continue; }
       const it = bySlug.get(slug) || byName.get(norm(c.n)), ts = it ? it.s : slug;
       try {
-        const res = await fetch("https://maplestory-classic.com/img/items/" + ts + ".webp", { headers: UA });
-        if (!res.ok) { log.failed.push([slug, res.status]); continue; }
+        // the image file name usually equals the slug; names with apostrophes are written a few different ways
+        const plain = (x) => String(x).toLowerCase().replace(/['’"]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        let res = null;
+        for (const cand of [...new Set([ts, slug, plain(c.n), plain(it ? it.n : c.n)])]) { res = await fetch("https://maplestory-classic.com/img/items/" + cand + ".webp", { headers: UA }); if (res.ok) break; await sleep(120); }
+        if (!res || !res.ok) { log.failed.push([slug, res ? res.status : 0]); continue; }
         const sig = await signature(Buffer.from(await res.arrayBuffer()));
         const key = sig.src.slice(0, 2).join("x") + (sig.k > 1 ? " /" + sig.k : ""); log.sizes[key] = (log.sizes[key] || 0) + 1;
         if (log.samples.length < 6 || /tania-cloak|bunny-hat|lucia-hat|pumpkin-headgear|dragonfly-wings/.test(slug)) log.samples.push([slug, sig.w, sig.h, sig.k, sig.box, sig.src]);

@@ -209,9 +209,21 @@
         if (done || col >= (yb - ya) * 0.9) continue;          // a full-height white column is the tooltip's border
         if (col) { if (x1 < 0) x1 = px; x2 = px; wn += col; gap = 0; } else if (x1 >= 0 && ++gap > maxGap) done = true;
       }
-      if (darkN < (xb - xa) * (yb - ya) * 0.5) break;          // text in a tooltip sits on its dark panel
       if (orange > 18 * s * s) { if (names.length) break; untradable = true; used++; continue; }   // orange above the name belongs to something else
-      if (wn > 20 * s * s && x2 - x1 > 10 * s) { names.unshift({ x: x1 - 2, y: ya, w: x2 - x1 + 5, h: yb - ya }); used++; continue; }
+      // A name line is white text on the tooltip's dark panel: sparse, dark between the letters, with a
+      // clear margin above and below. Whatever lies above the tooltip (slots, scenery) fails this.
+      if (!(wn > 20 * s * s && x2 - x1 > 10 * s)) break;
+      let w2 = 0, dk = 0, tot = 0, edgeW = 0; const mt = Math.round(ya + (yb - ya) * 0.1), mb = Math.round(yb - (yb - ya) * 0.06);
+      for (let py = ya; py < yb; py++) for (let px = x1; px <= x2; px++) {
+        const q = (py * W + px) * 4, wh = d[q] >= 200 && d[q + 1] >= 200 && d[q + 2] >= 200; tot++;
+        if (wh) { w2++; if (py < mt || py >= mb) edgeW++; } else if (d[q] + d[q + 1] + d[q + 2] < 480) dk++;
+      }
+      if (w2 > tot * 0.45 || dk < (tot - w2) * 0.85 || edgeW > w2 * 0.06) break;
+      names.unshift({ x: x1 - 2, y: ya, w: x2 - x1 + 5, h: yb - ya }); used++;
+      // A one-line name starts with a cyan bullet. Seeing it means this is the top line of the name.
+      let cy = 0; for (let py = ya; py < yb; py++) for (let px = Math.max(0, Math.round(x1 - 10 * s)); px < x1; px++) { const q = (py * W + px) * 4; if (d[q + 2] > 200 && d[q + 1] > 150 && d[q] < 150 && d[q + 2] - d[q] > 80) cy++; }
+      if (cy > 6 * s * s) break;
+      continue;
       break;
     }
     if (!names.length) return null;

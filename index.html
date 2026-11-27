@@ -247,7 +247,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
       <div class="scan-left">
         <canvas id="scanPreview" width="10" height="10" aria-label="What the scanner sees"></canvas>
         <ol class="scan-steps">
-          <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row, a notch at a time. The pointer can be over the items. A soft tick means new rows were added.</li>
+          <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row at your normal speed. Rest the pointer on the bottom row so the item pop-up stays clear of the rows above. A soft tick means new rows were added; a low beep means you got ahead of it, and it will ask you to scroll back.</li>
           <li><b>Check.</b> Items are named from their icons as rows appear. Hover only the ones left unnamed, or any that look wrong: a hover always wins.</li>
           <li><b>Sync.</b> When the list looks right, sync. Copies are counted for you.</li>
         </ol>
@@ -616,7 +616,7 @@ $("#copyBtn").addEventListener("click", async () => {
 });
 
 /* ---------- update and reset ---------- */
-const BUILD = "2026-11-26 21:20 PT";
+const BUILD = "2026-11-26 22:10 PT";
 async function freshReload() {
   // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
   const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];

@@ -130,16 +130,27 @@
   }
   // Read the 30 visible slots. A slot under a tooltip, or under the pointer that sits just above the
   // hovered tooltip's corner, is marked unknown (unk) so it is never mistaken for an item.
-  function readSlots(img, grid, tips) {
+  // `lenient` (single screenshots, where each slot is seen only once) accepts a slot with two whole sides.
+  function readSlots(img, grid, tips, lenient) {
     const rows = [], s = grid.s, W = img.width, H = img.height, d = img.data;
-    const bright = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = (y * W + x) * 4; return d[k] > 222 && d[k + 1] > 222 && d[k + 2] > 222; };
+    // A slot is boxed in by white lines. If any side's line is hidden for more than a sliver, something
+    // (a tooltip, the pointer) is over the slot and its picture can't be trusted. The line is looked for
+    // in a small window, so being a pixel off doesn't matter.
+    const lit = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = (y * W + x) * 4; return d[k] >= 232 && d[k + 1] >= 232 && d[k + 2] >= 232; };
+    const OFFS = [0, -0.5, 0.5, -1, 1], ALONG = [0.12, 0.31, 0.5, 0.69, 0.88];
+    const side = (q, horiz, at) => { let n = 0; for (const t of ALONG) for (const o of OFFS) if (horiz ? lit(q.x + q.w * t, at + o * s) : lit(at + o * s, q.y + q.h * t)) { n++; break; } return n; };
+    // The lines at a slot's left and right are never crossed by an icon, so they must be nearly whole. A tall
+    // icon can poke over the line above it and hide up to three of the five points there.
+    const boxed = (q) => {
+      const a = side(q, false, q.x - 2.3 * s), b = side(q, false, q.x + q.w + 1.7 * s), c = side(q, true, q.y - 2.9 * s), e = side(q, true, q.y + q.h - 0.9 * s);
+      return lenient ? (a >= 4) + (b >= 4) + (c >= 4) + (e >= 4) >= 2 : a >= 4 && b >= 4 && c >= 2 && e >= 2;
+    };
     const bands = (tips || []).map((t) => ({ y1: t.top - 31 * s, y2: t.top + 1 * s, x1: tips.length > 1 ? -1e9 : t.left - 16 * s, x2: tips.length > 1 ? 1e9 : t.left + 32 * s }));
     for (let r = 0; r < ROWS; r++) {
       const row = [];
       for (let c = 0; c < COLS; c++) {
         const q = slotRect(grid, r, c);
-        const clear = (bright(q.x - 2 * s, q.y + q.h / 2) ? 1 : 0) + (bright(q.x + q.w + 2 * s, q.y + q.h / 2) ? 1 : 0) + (bright(q.x + q.w / 2, q.y - 2.4 * s) ? 1 : 0) + (bright(q.x + q.w / 2, q.y + 32.2 * s) ? 1 : 0);   // the thin white lines between slots
-        let unk = clear < 2;
+        let unk = !boxed(q);
         for (const t of tips || []) if (q.x < t.left + 240 * s && q.x + q.w > t.left - 3 * s && q.y + q.h > t.top - 3 * s) unk = true;   // under a tooltip, or possibly so
         for (const b of bands) if (q.y < b.y2 && q.y + q.h > b.y1 && q.x < b.x2 && q.x + q.w > b.x1) unk = true;
         if (unk) { row.push({ unk: true }); continue; }
@@ -289,53 +300,109 @@
     return true;
   }
   const bits = (m) => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
+  // How well a run of rows lines up with mapped rows at a given offset. `get(r)` returns a row of slots or null.
+  function lineUp(rows, get, len, off) {
+    let same = 0, emp = 0, diff = 0;
+    for (let r = 0; r < len; r++) {
+      const m = rows[off + r], v = get(r); if (!m || !v) continue;
+      for (let c = 0; c < COLS; c++) {
+        const a = m[c].cur, x = v[c]; if (!a || !x || x.unk) continue;
+        if (a.empty && x.empty) emp++; else if (slotSame(a, x)) same++; else diff++;
+      }
+    }
+    return { same, emp, diff };
+  }
+  // Matching items are strong evidence and matching empty slots weak evidence. A few slots may disagree
+  // (the pointer over one, a half-covered edge), but only a small share of what was compared.
+  const EMPTY_W = 0.34, NEED = 3;
+  const fits = (k) => k.same + k.emp * EMPTY_W >= NEED && k.diff <= 1 + Math.floor((k.same + k.emp + k.diff) * 0.12);
+  const blankRow = () => Array.from({ length: COLS }, () => ({ cur: null, alts: [] }));
   class InvMap {
-    constructor() { this.rows = []; this.offset = 0; this.lost = false; this.tick = 0; this.ver = 0; }
-    // Place a six-row view, which may have unknown slots. `pages` = true means views may arrive a whole
-    // page apart (screenshots). Returns null when the view cannot be placed, {skip:true} when too little of it is visible.
-    add(view, pages) {
-      this.tick++;
-      let seen = 0; for (const row of view) for (const sl of row) if (!sl.unk) seen++;
-      if (seen < 8) return { skip: true };
+    // The inventory is kept as one or more stretches of rows. Normally there is one. When the list jumps
+    // further than a view can be matched (fast scrolling), the new place starts its own stretch, and
+    // stretches join up as soon as scrolling shows how they overlap.
+    constructor() { this.segs = [{ rows: [], offset: 0 }]; this.at = 0; this.tick = 0; this.ver = 0; this.blank = false; }
+    get rows() { return this.segs[this.at].rows; }
+    get offset() { return this.segs[this.at].offset; }
+    get lost() { return this.segs.length > 1; }
+    get gaps() { return this.segs.length - 1; }
+    find(seg, view) {
       let best = null;
-      if (!this.rows.length) best = { off: 0 };
+      for (let off = -(ROWS - 1); off <= seg.rows.length - 1; off++) {
+        const k = lineUp(seg.rows, (r) => view[r], ROWS, off);
+        if (!fits(k)) continue;
+        if (!k.same && !(this.blank && Math.abs(off - seg.offset) <= ROWS)) continue;   // empty slots alone only count when the list was just seen scrolling through empty rows
+        const score = k.same + k.emp * EMPTY_W - 2.5 * k.diff - Math.abs(off - seg.offset) * 0.01;
+        if (!best || score > best.score) best = { off, score };
+      }
+      return best;
+    }
+    // Place a six-row view, which may have unknown slots. `firm` = the view has been seen twice running, so
+    // it is real and not a frame caught mid-change; only a firm view may start a new stretch. `pages` = views
+    // arrive in order and may be a whole page apart (screenshots). Returns null when the view cannot be
+    // placed, {skip:true} when there is nothing in it to place.
+    add(view, pages, firm) {
+      this.tick++;
+      let seen = 0, items = 0; for (const row of view) for (const sl of row) if (!sl.unk) { seen++; if (!sl.empty) items++; }
+      if (seen < 8) return { skip: true };
+      if (!items) { this.blank = true; return { skip: true }; }        // all empty: nothing to place, but remember it
+      let seg = this.segs[this.at], best = null, fresh = false;
+      if (!seg.rows.length) best = { off: 0 };
       else {
-        for (let off = -(ROWS - 1); off <= this.rows.length - 1; off++) {
-          let hit = 0, near = 0, bad = 0;
-          for (let r = 0; r < ROWS; r++) {
-            const m = this.rows[off + r]; if (!m) continue;
-            let known = 0, same = 0;
-            for (let c = 0; c < COLS; c++) { const v = view[r][c]; if (v.unk || !m[c].cur) continue; known++; if (slotSame(m[c].cur, v)) same++; }
-            if (known < 2) continue;                              // not enough of this row is visible to say anything
-            if (same === known) hit += known / COLS; else if (known >= 4 && same === known - 1) near++; else bad++;
-          }
-          // one slot in one row may differ; anything more is a different place
-          if (bad || hit < 0.8 || near > 1 || (near && hit < 2)) continue;
-          const score = hit * 100 + near * 40 - Math.abs(off - this.offset);
-          if (!best || score > best.score) best = { off, score };
-        }
+        best = this.find(seg, view);
+        if (!best) for (let i = 0; i < this.segs.length && !best; i++) if (i !== this.at) { best = this.find(this.segs[i], view); if (best) { this.at = i; seg = this.segs[i]; } }
         if (!best) {
-          if (!pages) { this.lost = true; return null; }
-          best = { off: this.rows.length };
+          if (pages) best = { off: seg.rows.length };
+          else if (firm && items >= 3) { seg = { rows: [], offset: 0 }; this.segs.push(seg); this.at = this.segs.length - 1; best = { off: 0 }; fresh = true; }
+          else return null;
         }
       }
-      this.lost = false;
+      this.blank = false;
       let off = best.off, added = 0;
-      const blank = () => Array.from({ length: COLS }, () => ({ cur: null, alts: [] }));
-      if (off < 0) { const n = -off; this.rows = Array.from({ length: n }, blank).concat(this.rows); added += n; off = 0; }
+      if (off < 0) { const n = -off; seg.rows = Array.from({ length: n }, blankRow).concat(seg.rows); added += n; off = 0; }
       if (added) this.ver++;
       for (let r = 0; r < ROWS; r++) {
-        if (off + r >= this.rows.length) { this.rows.push(blank()); added++; this.ver++; }
-        for (let c = 0; c < COLS; c++) if (!view[r][c].unk) this.put(this.rows[off + r][c], view[r][c], r);
+        if (off + r >= seg.rows.length) { seg.rows.push(blankRow()); added++; this.ver++; }
+        for (let c = 0; c < COLS; c++) if (!view[r][c].unk) this.put(seg.rows[off + r][c], view[r][c], r);
       }
-      this.offset = off;
-      return { offset: off, added };
+      seg.offset = off;
+      const joined = this.segs.length > 1 ? this.join() : 0;
+      return { offset: this.segs[this.at].offset, added, fresh, joined };
+    }
+    // Join the current stretch with any other stretch it now overlaps. Needs at least two matching items.
+    join() {
+      let n = 0;
+      for (let again = true; again;) {
+        again = false;
+        const a = this.segs[this.at];
+        for (let i = 0; i < this.segs.length; i++) {
+          if (i === this.at) continue;
+          const b = this.segs[i]; let best = null, ties = 0;
+          for (let off = -(b.rows.length - 1); off <= a.rows.length - 1; off++) {
+            const k = lineUp(a.rows, (r) => b.rows[r].map((cell) => cell.cur || { unk: true }), b.rows.length, off);
+            if (k.same < 2 || !fits(k)) continue;
+            const score = k.same + k.emp * EMPTY_W - 2.5 * k.diff;
+            if (!best || score > best.score + 0.5) { best = { off, score }; ties = 0; } else if (score > best.score - 0.5) ties++;
+          }
+          if (!best || ties) continue;
+          let off = best.off;
+          if (off < 0) { a.rows = Array.from({ length: -off }, blankRow).concat(a.rows); a.offset -= off; off = 0; }
+          for (let r = 0; r < b.rows.length; r++) {
+            if (off + r >= a.rows.length) a.rows.push(blankRow());
+            for (let c = 0; c < COLS; c++) for (const alt of b.rows[r][c].alts) this.merge(a.rows[off + r][c], alt);
+          }
+          this.segs.splice(i, 1); if (i < this.at) this.at--;
+          this.ver++; n++; again = true; break;
+        }
+      }
+      return n;
     }
     // A slot is seen at up to six screen positions as the list scrolls. The reading seen at the most
     // positions wins, so a pointer parked over one spot cannot overwrite what was there.
-    put(cell, slot, r) {
-      let v = cell.alts.find((a) => slotSame(a.slot, slot));
-      if (v) { v.mask |= 1 << r; v.t = this.tick; v.n++; v.slot = slot; } else cell.alts.push((v = { slot, mask: 1 << r, t: this.tick, n: 1 }));
+    put(cell, slot, r) { this.merge(cell, { slot, mask: 1 << r, t: this.tick, n: 1 }); }
+    merge(cell, alt) {
+      let v = cell.alts.find((a) => slotSame(a.slot, alt.slot));
+      if (v) { v.mask |= alt.mask; v.n += alt.n; if (alt.t >= v.t) { v.t = alt.t; v.slot = alt.slot; } } else cell.alts.push((v = { slot: alt.slot, mask: alt.mask, t: alt.t, n: alt.n }));
       let top = cell.alts[0];
       const better = (a, b) => bits(a.mask) !== bits(b.mask) ? bits(a.mask) > bits(b.mask) : a.n !== b.n ? a.n > b.n : a.t > b.t;   // more positions, then more sightings, then newer
       for (const a of cell.alts) if (better(a, top)) top = a;
@@ -343,18 +410,21 @@
       cell.cur = top.slot;
     }
     // Rows that hold at least one item, and slots inside those rows that were never seen clearly.
-    filled() { let n = 0; this.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) n = i + 1; }); return n; }
-    unseen() { const f = this.filled(); let n = 0; for (let i = 0; i < f; i++) for (const c of this.rows[i]) if (!c.cur) n++; return n; }
+    filled() { let t = 0; for (const seg of this.segs) { let n = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) n = i + 1; }); t += n; } return t; }
+    unseen() { let n = 0; for (const seg of this.segs) { let f = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) f = i + 1; }); for (let i = 0; i < f; i++) for (const c of seg.rows[i]) if (!c.cur) n++; } return n; }
     // Group identical icons. Each group counts its unworn (red) and worn (purple) copies.
     groups() {
-      const gs = [];
-      this.rows.forEach((row, r) => row.forEach((cell, c) => {
-        const sl = cell.cur; if (!sl || sl.empty) return;
-        let g = null, gd = SAME;
-        for (const k of gs) { const dd = dist(k.fp, sl.fp); if (dd <= gd) { g = k; gd = dd; } }
-        if (!g) { g = { fp: sl.fp, thumb: sl.thumb, red: 0, purple: 0, other: 0, slots: [] }; gs.push(g); }
-        g[sl.badge || "other"]++; g.slots.push([r, c]);
-      }));
+      const gs = []; let base = 0;
+      for (const seg of this.segs) {
+        seg.rows.forEach((row, r) => row.forEach((cell, c) => {
+          const sl = cell.cur; if (!sl || sl.empty) return;
+          let g = null, gd = SAME;
+          for (const k of gs) { const dd = dist(k.fp, sl.fp); if (dd <= gd) { g = k; gd = dd; } }
+          if (!g) { g = { fp: sl.fp, thumb: sl.thumb, red: 0, purple: 0, other: 0, slots: [] }; gs.push(g); }
+          g[sl.badge || "other"]++; g.slots.push([base + r, c]);
+        }));
+        base += seg.rows.length;
+      }
       return gs;
     }
   }

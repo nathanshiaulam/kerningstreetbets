@@ -72,6 +72,46 @@
   }
 
   /* ---------- one frame ---------- */
+  // Place what one picture shows of the inventory. `img` may be a cut-out of the frame whose corner is at
+  // (ox, oy). A grid half hidden by a tooltip is still usable: the last fully visible position is used
+  // if it has not moved. Runs on every frame while sharing, so a quick scroll is followed row by row.
+  function mapStep(img, grid, tips, o, ox, oy) {
+    let g = grid;
+    if (grid && grid.covered && st.grid && Math.abs(grid.x0 + ox - st.grid.x0) <= 2 && Math.abs(grid.y0 + oy - st.grid.y0) <= 2) g = { x0: st.grid.x0 - ox, y0: st.grid.y0 - oy, s: st.grid.s };
+    if (!g) return false;
+    const rows = S.readSlots(img, g, tips, !!o.pages);
+    const firm = !!o.force || S.sameView(rows, st.lastRows);     // seen twice running: the list has stopped moving
+    st.lastRows = rows;
+    const r = st.map.add(rows, !!o.pages, firm);
+    if (!r || r.skip) return true;
+    if (r.fresh) { beep("bad"); say("You scrolled faster than I could follow, so there's a gap. Scroll back through the rows you skipped and I'll join them up."); st.dirty = true; return true; }
+    if (r.added || r.joined) {
+      st.dirty = true;
+      const now = performance.now(); if (now - (st.lastBeep || 0) > 150) { st.lastBeep = now; beep("row"); }
+    }
+    if (r.joined && !st.map.gaps) say("Joined up. " + st.map.filled() + " rows mapped so far. Keep scrolling to the end.");
+    else if (!tips.length && !st.map.gaps && (!st.named.length || r.added)) say("Inventory found: " + st.map.filled() + " rows mapped so far. Keep scrolling to the end.");
+    return true;
+  }
+  // The quick path, for the frames between full looks: only the inventory's corner of the picture is read,
+  // and only if it changed, so following a fast scroll costs little.
+  const qc = document.createElement("canvas"), qx = qc.getContext("2d", { willReadFrequently: true });
+  function fast(source, w, h) {
+    const g = st.grid, s = st.s; if (!g || !s) return;
+    const x1 = Math.max(0, Math.floor(g.x0 - 10 * s)), y1 = Math.max(0, Math.floor(g.y0 - 50 * s)), x2 = Math.min(w, Math.ceil(g.x0 + 310 * s)), y2 = Math.min(h, Math.ceil(g.y0 + 390 * s));
+    const cw = x2 - x1, ch = y2 - y1; if (cw < 215 * s || ch < 265 * s) return;
+    if (qc.width !== cw || qc.height !== ch) { qc.width = cw; qc.height = ch; }
+    qx.drawImage(source, x1, y1, cw, ch, 0, 0, cw, ch);
+    const img = qx.getImageData(0, 0, cw, ch), d = img.data, R = S.gridRect({ x0: g.x0 - x1, y0: g.y0 - y1, s });
+    let sum = 0;
+    for (let y = Math.max(0, Math.floor(R.y - 4 * s)), ye = Math.min(ch, R.y + R.h + 4 * s); y < ye; y += 3) for (let x = Math.max(0, Math.floor(R.x - 4 * s)), xe = Math.min(cw, R.x + R.w + 4 * s), k = (y * cw + x) * 4; x < xe; x += 3, k += 12) sum = (sum * 31 + d[k] + (d[k + 1] << 8) + (d[k + 2] << 16)) | 0;
+    if (sum === st.lastSum) return;                               // nothing over the inventory changed
+    st.lastSum = sum;
+    const grid = S.findGrid(img);
+    if (!grid || Math.abs(grid.x0 + x1 - g.x0) > 2 || Math.abs(grid.y0 + y1 - g.y0) > 2) return;   // the window moved or closed: the next full look sorts it out
+    // tooltips move only when the pointer does, so the ones found by the last full look still say what is covered
+    mapStep(img, grid, st.lastTips.map((t) => ({ left: t.left - x1, top: t.top - y1 })), {}, x1, y1);
+  }
   async function onFrame(img, o) {
     const grid = S.findGrid(img);
     if (grid && !grid.covered) { st.grid = grid; st.s = grid.s; st.sawOpenGrid = true; }
@@ -81,20 +121,7 @@
     const tips = S.findTips(img, st.s);
     st.lastTips = tips;
     // Map first: every slot that is not under a tooltip or the pointer adds to the picture of the inventory.
-    // A grid half hidden by a tooltip is still usable: prefer the last fully visible position if it has not moved.
-    const g = !grid ? null : !grid.covered ? grid : st.grid && Math.abs(grid.x0 - st.grid.x0) <= 2 && Math.abs(grid.y0 - st.grid.y0) <= 2 ? st.grid : grid;
-    if (g) {
-      const rows = S.readSlots(img, g, tips);
-      if (o.force || S.sameView(rows, st.lastRows)) {            // wait until the list has stopped moving
-        const wasLost = st.map.lost, r = st.map.add(rows, !!o.pages);
-        if (!r) { if (!wasLost) beep("bad"); if (!tips.length) say("You scrolled further than I could follow. Scroll back toward rows I've seen, one notch at a time."); }
-        else if (!r.skip) {
-          if (r.added) { beep("row"); st.dirty = true; }
-          if (!tips.length && (!st.named.length || r.added || wasLost)) say("Inventory found: " + st.map.filled() + " rows mapped so far. Keep scrolling to the end, and hover each different item once.");
-        }
-      }
-      st.lastRows = rows;
-    } else if (!tips.length && !st.map.rows.length) say("Looking for your item inventory. Open it on the Deco tab.");
+    if (!mapStep(img, grid, tips, o, 0, 0) && !tips.length && !st.map.rows.length) say("Looking for your item inventory. Open it on the Deco tab.");
     if (!tips.length) { st.hover = null; return; }
 
     const tip = tips[0];                         // the left-most tooltip is the hovered item; any other is what you have equipped
@@ -143,7 +170,7 @@
     st.dirty = false;
     const res = (st.res = results()), sellRows = res.rows.filter((r) => r.g.red > 0), named = sellRows.filter((r) => r.name).length;
     $("#scanCounts").textContent = st.map.rows.length
-      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.unseen() ? " · " + st.map.unseen() + " slots not seen clearly yet (move the pointer off them)" : "") + (st.pending ? " · naming " + st.pending + " more…" : "")
+      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.gaps ? " · gap in the scan: scroll back through the rows you skipped" : "") + (st.map.unseen() ? " · " + st.map.unseen() + " slots not seen clearly yet (move the pointer off them)" : "") + (st.pending ? " · naming " + st.pending + " more…" : "")
       : st.named.length ? st.named.length + " names read. Scroll through the inventory with no item hovered so the items can be counted." : "";
     list.replaceChildren();
     const order = sellRows.slice().sort((a, b) => (a.name ? 1 : 0) - (b.name ? 1 : 0) || a.g.slots[0][0] - b.g.slots[0][0] || a.g.slots[0][1] - b.g.slots[0][1]);
@@ -214,7 +241,7 @@
     openPanel();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { say("This browser can't share a screen (phones and tablets can't). Open this page in Chrome or Edge on a computer, or use screenshots."); return; }
     let stream;
-    try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 10, max: 15 } }, audio: false }); }
+    try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: false }); }
     catch (e) { say(e && e.name === "NotAllowedError" ? "Sharing was cancelled or blocked. Click Share MapleStory window to try again." : "The browser couldn't start sharing (" + (e && e.name || "error") + "). Try again, or use screenshots."); return; }
     try { st.ac = st.ac || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
     st.on = true; st.lastChange = Date.now(); st.stream = stream; st.track = stream.getVideoTracks()[0];
@@ -227,19 +254,27 @@
         while (st.on) {
           let r; try { r = await rd.read(); } catch (e) { break; }
           if (r.done) break;
-          const f = r.value, now = performance.now();
-          if (st.busy || now - st.lastTick < 160) { f.close(); continue; }
-          st.lastTick = now; st.busy = true;
-          try { const w = f.displayWidth, h = f.displayHeight; if (fc.width !== w || fc.height !== h) { fc.width = w; fc.height = h; } await handle(f, w, h); }
-          catch (e) { console.error(e); } finally { f.close(); st.busy = false; }
+          const f = r.value, now = performance.now(), w = f.displayWidth, h = f.displayHeight;
+          if (!st.busy && now - st.lastTick >= 160) {             // a full look: find the inventory, read tooltips
+            st.lastTick = now; st.busy = true;
+            handle(f, w, h).catch((e) => console.error(e)).finally(() => { f.close(); st.busy = false; });
+            continue;
+          }
+          try { if (now - (st.lastFast || 0) >= 40) { st.lastFast = now; fast(f, w, h); if (st.dirty && !st.busy) renderScan(); } } catch (e) { console.error(e); }
+          f.close();
         }
         try { rd.cancel(); } catch (e) {}
       })();
     } else {
       const v = (st.video = document.createElement("video")); v.muted = true; v.srcObject = stream; await v.play();
-      const tick = new Worker(URL.createObjectURL(new Blob(["setInterval(()=>postMessage(0),180)"], { type: "text/javascript" })));
+      const tick = new Worker(URL.createObjectURL(new Blob(["setInterval(()=>postMessage(0),45)"], { type: "text/javascript" })));
       st.timer = tick;
-      tick.onmessage = async () => { if (!st.on || st.busy || !v.videoWidth) return; st.busy = true; try { await handle(v, v.videoWidth, v.videoHeight); } catch (e) { console.error(e); } finally { st.busy = false; } };
+      tick.onmessage = () => {
+        if (!st.on || !v.videoWidth) return;
+        const now = performance.now();
+        if (!st.busy && now - st.lastTick >= 160) { st.lastTick = now; st.busy = true; handle(v, v.videoWidth, v.videoHeight).catch((e) => console.error(e)).finally(() => { st.busy = false; }); }
+        else try { fast(v, v.videoWidth, v.videoHeight); if (st.dirty && !st.busy) renderScan(); } catch (e) { console.error(e); }
+      };
     }
     setButtons();
   }
@@ -253,7 +288,7 @@
     setButtons(); renderScan();
   }
   function reset() {
-    st.map = new S.InvMap(); st.named = []; st.manual = []; st.dbCache = []; st.hover = null; st.lastRows = null; st.grid = null; st.sawOpenGrid = false; st.dirty = true;
+    st.map = new S.InvMap(); st.named = []; st.manual = []; st.dbCache = []; st.hover = null; st.lastRows = null; st.lastSum = null; st.grid = null; st.sawOpenGrid = false; st.dirty = true;
     $("#scanMsg").textContent = ""; say(st.on ? "Scan cleared. Looking for your item inventory…" : "Scan cleared."); renderScan();
   }
   async function fromFiles(files) {
@@ -288,13 +323,13 @@
   $("#scanFiles").addEventListener("change", (e) => { const f = e.target.files; fromFiles(f).finally(() => { e.target.value = ""; }); });
   $("#scanApply").addEventListener("click", () => {
     const b = $("#scanApply");
-    if (Date.now() - st.armed > 5000) { st.armed = Date.now(); const rs = (st.res || results()).rows.filter((r) => r.g.red > 0 && !r.redUntradable), un = rs.filter((r) => !r.name).length; b.textContent = (un ? un + " kinds have no name yet and will show as Unnamed. " : "") + "Replace " + pf.holdings.length + " portfolio rows with " + rs.length + " scanned? Click again"; setTimeout(() => { if (st.armed && Date.now() - st.armed >= 5000) { b.textContent = "Sync portfolio to this scan"; st.armed = 0; } }, 5100); return; }
+    if (Date.now() - st.armed > 5000) { st.armed = Date.now(); const rs = (st.res || results()).rows.filter((r) => r.g.red > 0 && !r.redUntradable), un = rs.filter((r) => !r.name).length; b.textContent = (st.map.gaps ? "There's a gap in the scan, so items may be missing or counted twice. " : "") + (un ? un + " kinds have no name yet and will show as Unnamed. " : "") + "Replace " + pf.holdings.length + " portfolio rows with " + rs.length + " scanned? Click again"; setTimeout(() => { if (st.armed && Date.now() - st.armed >= 5000) { b.textContent = "Sync portfolio to this scan"; st.armed = 0; } }, 5100); return; }
     st.armed = 0; b.textContent = "Sync portfolio to this scan"; applyScan();
   });
   $("#scanUndo").addEventListener("click", () => { if (!st.undo) return; pf.holdings = st.undo; st.undo = null; sel = null; changed(); $("#scanUndo").hidden = true; $("#scanMsg").textContent = "Put your portfolio back the way it was before the sync."; });
   $("#scanCopy").addEventListener("click", async () => {
     const res = st.res || results(), f1 = (x) => (x == null || !isFinite(x) ? null : +x.toFixed(1));
-    const text = JSON.stringify({ scale: f1(st.s * 100) / 100, frame: st.frame, grid: st.grid && [Math.round(st.grid.x0), Math.round(st.grid.y0)], rows: st.map.rows.length, filled: st.map.filled(), kinds: res.rows.length, named: st.named.length,
+    const text = JSON.stringify({ scale: f1(st.s * 100) / 100, frame: st.frame, grid: st.grid && [Math.round(st.grid.x0), Math.round(st.grid.y0)], rows: st.map.rows.length, stretches: st.map.segs.map((g) => g.rows.length), filled: st.map.filled(), kinds: res.rows.length, named: st.named.length,
       unmatched: res.loose.map((n) => ({ name: n.name, d: n.m && f1(n.m.d), second: n.m && f1(n.m.second), shift: n.m && [n.m.dx, n.m.dy], nearest: n.m && res.rows[n.m.i] ? res.rows[n.m.i].g.slots[0] : null })) });
     try { await navigator.clipboard.writeText(text); $("#scanMsg").textContent = "Copied the scan details. Paste them into your Claude chat."; } catch (e) { $("#scanMsg").textContent = text; }
   });

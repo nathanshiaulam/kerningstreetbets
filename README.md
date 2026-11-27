@@ -16,6 +16,9 @@ A portfolio tracker for MapleStory Classic World cash items: what you hold, what
 `scan-core.js` and `scan.js` read a shared MapleStory window (or uploaded screenshots) in the browser. Nothing is uploaded.
 
 - Frames with no tooltip build a map of the inventory: the grid is found from the red line under the tabs, each slot is fingerprinted, and scrolled views are stitched by their overlapping rows.
+- Scrolling is followed frame by frame. Between full looks (about six a second) a quick path reads only the inventory's corner of each frame, and only when it changed, so a fast scroll is still seen one or two rows at a time. A view is placed where most of its slots agree with the map; a few may disagree (the pointer over one, a half-covered edge).
+- If the list still jumps further than a view can be matched, the new place starts its own stretch of rows. The page says there is a gap, and the stretches join as soon as scrolling back shows how they overlap.
+- A slot counts as seen only when the white lines around it are visible, so a slot partly under a tooltip or the pointer is left as "not seen clearly" instead of being misread.
 - Frames with a tooltip give a name: the left-most tooltip is the hovered item, its name line is read with Tesseract, and its icon is matched to the slots in the map.
 - Quantities come from the map, not from hovers, so hovering an item twice, or hovering its second copy, changes nothing. Only unworn items (red badge) are counted.
 - Synced rows keep their icon, and that icon names the same item on the next scan without a hover.

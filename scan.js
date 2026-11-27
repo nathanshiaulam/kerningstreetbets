@@ -205,7 +205,9 @@
     st.frame = { width: w, height: h };
     await onFrame(img, o || {});
     drawPreview();
-    if (st.dirty) renderScan();
+    if (st.dirty) { st.lastChange = Date.now(); renderScan(); }
+    // Safety: a share left running does heavy work for nothing. Stop after ten minutes with nothing new.
+    if (st.on && Date.now() - (st.lastChange || 0) > 10 * 60 * 1000) { stop(); say("Sharing stopped after 10 minutes with nothing new. Click Share MapleStory window to carry on."); }
   }
   async function start() {
     if (st.on) return;
@@ -215,7 +217,7 @@
     try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 10, max: 15 } }, audio: false }); }
     catch (e) { say(e && e.name === "NotAllowedError" ? "Sharing was cancelled or blocked. Click Share MapleStory window to try again." : "The browser couldn't start sharing (" + (e && e.name || "error") + "). Try again, or use screenshots."); return; }
     try { st.ac = st.ac || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-    st.on = true; st.stream = stream; st.track = stream.getVideoTracks()[0];
+    st.on = true; st.lastChange = Date.now(); st.stream = stream; st.track = stream.getVideoTracks()[0];
     st.track.addEventListener("ended", stop);
     openPanel(); say("Sharing started. Looking for your item inventory…");
     reader().catch(() => {});                      // warm up the text reader

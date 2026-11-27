@@ -128,20 +128,28 @@
     for (let i = 0; i < fp.length; i += 3) t += Math.abs(fp[i] - SLOT_BG[0]) + Math.abs(fp[i + 1] - SLOT_BG[1]) + Math.abs(fp[i + 2] - SLOT_BG[2]);
     return t / fp.length < 9;
   }
-  function readSlots(img, grid) {
-    const rows = [];
+  // Read the 30 visible slots. A slot under a tooltip, or under the pointer that sits just above the
+  // hovered tooltip's corner, is marked unknown (unk) so it is never mistaken for an item.
+  function readSlots(img, grid, tips) {
+    const rows = [], s = grid.s, W = img.width, H = img.height, d = img.data;
+    const bright = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = (y * W + x) * 4; return d[k] > 222 && d[k + 1] > 222 && d[k + 2] > 222; };
+    const bands = (tips || []).map((t) => ({ y1: t.top - 31 * s, y2: t.top + 1 * s, x1: tips.length > 1 ? -1e9 : t.left - 16 * s, x2: tips.length > 1 ? 1e9 : t.left + 32 * s }));
     for (let r = 0; r < ROWS; r++) {
       const row = [];
       for (let c = 0; c < COLS; c++) {
-        const q = slotRect(grid, r, c), raw = sample(img, q.x, q.y, q.w, q.h, N, N);
-        const empty = isEmptySlot(raw);
+        const q = slotRect(grid, r, c);
+        const clear = (bright(q.x - 2 * s, q.y + q.h / 2) ? 1 : 0) + (bright(q.x + q.w + 2 * s, q.y + q.h / 2) ? 1 : 0) + (bright(q.x + q.w / 2, q.y - 2.4 * s) ? 1 : 0) + (bright(q.x + q.w / 2, q.y + 32.2 * s) ? 1 : 0);   // the thin white lines between slots
+        let unk = clear < 2;
+        for (const t of tips || []) if (q.x < t.left + 240 * s && q.x + q.w > t.left - 3 * s && q.y + q.h > t.top - 3 * s) unk = true;   // under a tooltip, or possibly so
+        for (const b of bands) if (q.y < b.y2 && q.y + q.h > b.y1 && q.x < b.x2 && q.x + q.w > b.x1) unk = true;
+        if (unk) { row.push({ unk: true }); continue; }
+        const raw = sample(img, q.x, q.y, q.w, q.h, N, N), empty = isEmptySlot(raw);
         row.push({ empty, badge: empty ? null : badgeOf(raw), fp: relBg(raw, SLOT_BG), thumb: empty ? null : sample(img, q.x, q.y, q.w, q.h, 32, 32) });
       }
       rows.push(row);
     }
     return rows;
   }
-
   // Rebuild a slot fingerprint from a saved 32 x 32 RGBA thumbnail, so names carry over to the next scan.
   function thumbFp(rgba) {
     const raw = new Float32Array(N * N * 3);
@@ -153,87 +161,61 @@
   }
 
   /* ---------- tooltips ---------- */
-  // Each tooltip's name line starts with a small cyan dot followed by bold white text.
+  // Every item tooltip has a pale square holding the icon at twice its size. That square is the anchor:
+  // short names start with a bullet and long names wrap and are centred with no bullet, but the square
+  // is always there. The lines above it are the name (one or more white lines) and, for a worn item,
+  // an orange "Untradable" line directly above the square.
+  const BOX = 67.2, LINE = 14.4;
   function findTips(img, s) {
-    const W = img.width, H = img.height, d = img.data, seen = new Uint8Array(W * H), tips = [];
-    const cyan = (k) => d[k + 2] > 230 && Math.abs(d[k] - 85) < 30 && Math.abs(d[k + 1] - 204) < 30;
-    const lo = Math.max(3, 3.3 * s), hi = Math.max(6, 6.2 * s), stack = [], dots = [];
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const p = y * W + x;
-      if (seen[p] || !cyan(p * 4)) continue;
-      let x1 = x, x2 = x, y1 = y, y2 = y, area = 0; stack.length = 0; stack.push(p); seen[p] = 1;
-      while (stack.length && area < 2000) {
-        const q = stack.pop(), qx = q % W, qy = (q / W) | 0; area++;
-        if (qx < x1) x1 = qx; if (qx > x2) x2 = qx; if (qy < y1) y1 = qy; if (qy > y2) y2 = qy;
-        for (const n of [q - 1, q + 1, q - W, q + W]) {
-          if (n < 0 || n >= W * H || seen[n]) continue;
-          if ((n === q - 1 && qx === 0) || (n === q + 1 && qx === W - 1)) continue;
-          if (cyan(n * 4)) { seen[n] = 1; stack.push(n); }
-        }
-      }
-      const w = x2 - x1 + 1, h = y2 - y1 + 1;
-      if (w < lo || h < lo || w > hi || h > hi || Math.abs(w - h) > Math.max(2, s) || area < 0.45 * w * h) continue;
-      dots.push({ x: x1, y: y1, w, h });
+    const W = img.width, H = img.height, d = img.data, B = BOX * s, e = Math.max(2, Math.round(1.5 * s));
+    const pale = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = ((y | 0) * W + (x | 0)) * 4; return Math.abs(d[k] - TIP_BG[0]) < 26 && Math.abs(d[k + 1] - TIP_BG[1]) < 26 && Math.abs(d[k + 2] - TIP_BG[2]) < 26; };
+    const frac = (x1, y1, x2, y2) => { let n = 0, t = 0; const sx = Math.max(1, (x2 - x1) / 24), sy = Math.max(1, (y2 - y1) / 24); for (let y = y1; y < y2; y += sy) for (let x = x1; x < x2; x += sx) { t++; if (pale(x, y)) n++; } return t ? n / t : 0; };
+    const boxes = [];
+    for (let y = e; y < H - B; y++) for (let x = e; x < W - B; x++) {
+      const k = (y * W + x) * 4;
+      if (Math.abs(d[k + 2] - TIP_BG[2]) >= 26 || !pale(x, y) || pale(x - e, y) || pale(x, y - e) || !pale(x + e, y + e)) continue;   // a top-left corner
+      if (boxes.some((b) => Math.abs(b.x - x) < B * 0.6 && Math.abs(b.y - y) < B * 0.6)) continue;
+      // The icon can touch any edge, so ask for the three edges together rather than each one fully.
+      const fl = frac(x, y, x + e, y + B), ft = frac(x, y, x + B, y + e), fr = frac(x + B - e, y, x + B, y + B * 0.6);
+      if (fl < 0.3 || ft < 0.3 || fr < 0.3 || fl + ft + fr < 1.6) continue;
+      if (frac(x - 2 * e, y, x - e, y + B) > 0.2 || frac(x, y - 2 * e, x + B, y - e) > 0.2 || frac(x + B + e, y, x + B + 2 * e, y + B) > 0.3) continue;   // dark panel outside
+      if (frac(x, y, x + B, y + B) < 0.08) continue;                                                    // a big dark icon can fill most of the square
+      boxes.push({ x, y, w: B, h: B });
     }
-    for (const d of dots) {
-      let stop = W;                                   // the next tooltip's dot on the same line ends this name
-      for (const o of dots) if (o !== d && o.x > d.x + d.w && Math.abs(o.y - d.y) < 9 * s && o.x - 2 * s < stop) stop = Math.round(o.x - 2 * s);
-      const tip = nameLine(img, s, d.x, d.y, d.w, d.h, stop);
-      if (tip) tips.push(tip);
-    }
-    tips.sort((a, b) => a.dot.x - b.dot.x);
+    const tips = [];
+    for (const box of boxes) { const t = readTip(img, s, box); if (t) tips.push(t); }
+    tips.sort((a, b) => a.box.x - b.box.x);
     return tips;
   }
-  function nameLine(img, s, x, y, w, h, stop) {
-    const W = img.width, H = img.height, d = img.data, cy = y + h / 2;
-    const y1 = Math.max(0, Math.round(cy - 6.5 * s)), y2 = Math.min(H, Math.round(cy + 9 * s));
-    const white = (px, py) => { const k = (py * W + px) * 4; return d[k] >= 200 && d[k + 1] >= 200 && d[k + 2] >= 200; };
-    const dark = (px, py) => { if (px < 0 || py < 0 || px >= W || py >= H) return true; const k = (Math.round(py) * W + Math.round(px)) * 4; return d[k] + d[k + 1] + d[k + 2] < 480; };
-    // the dot sits on the dark tooltip panel: dark to its left, above and below
-    if (!dark(x - 2 * s, cy) || !dark(x + w / 2, y - 2 * s) || !dark(x + w / 2, y + h + 2 * s)) return null;
-    const xs = Math.round(x + w + 1.5 * s), maxGap = 12 * s;
-    let last = -1, gap = 0, count = 0, darkN = 0, darkAt = 0, countAt = 0;
-    const lim = Math.min(W, stop || W);
-    for (let px = xs; px < lim && gap < maxGap; px++) {
-      let any = false;
-      let col = 0;
-      for (let py = y1; py < y2; py++) { if (white(px, py)) { any = true; count++; col++; } else if (dark(px, py)) darkN++; }
-      if (col >= (y2 - y1) * 0.9) { count -= col; break; }
-      if (any) { last = px; gap = 0; darkAt = darkN; countAt = count; } else gap++;
-    }
-    if (last < 0 || last - xs < 10 * s || count < 25 * s * s) return null;
-    const area = (last - xs + 1) * (y2 - y1);                    // sparse white text on a mostly dark band
-    if (countAt > area * 0.5 || darkAt < area * 0.4) return null;
-    const first = (() => { for (let px = xs; px <= last; px++) for (let py = y1; py < y2; py++) if (white(px, py)) return px; return xs; })();
-    if (first - xs > 6 * s) return null;                       // the text must start right after the dot
-    // Between the name and the pale icon square there can be extra lines: the rest of a long name that
-    // wrapped, and an orange "Untradable". Find where the square really starts and classify each line.
-    const LINE = 14.4, BOX0 = 15.2;
-    const box = { x: x + 1 * s, y: cy + BOX0 * s, w: 67.2 * s, h: 67.2 * s };
-    const paleAt = (px, py) => { if (px < 0 || py < 0 || px >= W || py >= H) return false; const k = (Math.round(py) * W + Math.round(px)) * 4; return Math.abs(d[k] - TIP_BG[0]) < 26 && Math.abs(d[k + 1] - TIP_BG[1]) < 26 && Math.abs(d[k + 2] - TIP_BG[2]) < 26; };
-    const rowPale = (py) => { let n = 0; for (let i = 0; i < 12; i++) if (paleAt(box.x + box.w * (0.05 + 0.9 * i / 11), py)) n++; return n / 12; };
-    let top = null;
-    for (let py = Math.round(cy + 11 * s); py < cy + (BOX0 + LINE * 3.3) * s && py < H - 2; py++) if (rowPale(py) >= 0.45 && rowPale(py - 2 * s) <= 0.2) { top = py; break; }   // an icon can cover half of the square's top edge
-    if (top == null) { if (box.y + box.h * 0.5 < H) return null; }     // no icon square under the name: not a tooltip (unless it runs off the picture)
-    else box.y = top;
-    const extra = top == null ? 0 : Math.max(0, Math.round((top - (cy + BOX0 * s)) / (LINE * s)));
-    let untradable = false, name2 = null;
-    for (let k = 0; k < extra; k++) {
-      const ya = Math.round(cy + (9 + LINE * k) * s), yb = Math.min(H, Math.round(cy + (22.5 + LINE * k) * s)), xa = Math.max(0, Math.round(x - 2 * s)), xb = Math.min(lim, Math.round(x + 232 * s));
-      let orange = 0, wn = 0, wx1 = -1, wx2 = -1;
-      let gapN = 0, done = false;
+  function readTip(img, s, box) {
+    const W = img.width, H = img.height, d = img.data, left = box.x - 9 * s;
+    const xa = Math.max(0, Math.round(left + 2 * s)), xb = Math.min(W, Math.round(left + 236 * s)), maxGap = 12 * s;
+    // A real item tooltip has the row of orange class labels (Beginner, Warrior, ...) under the icon square.
+    let lab = 0; const ly1 = Math.round(box.y + box.h + 12 * s), ly2 = Math.round(box.y + box.h + 22 * s);
+    if (ly2 >= H) return null;
+    for (let py = ly1; py < ly2; py++) for (let px = xa; px < xb; px++) { const q = (py * W + px) * 4; if (d[q] > 180 && d[q + 1] > 60 && d[q + 1] < 180 && d[q + 2] < 80 && d[q] - d[q + 1] > 40) lab++; }
+    if (lab < 120 * s) return null;
+    const names = []; let untradable = false, used = 0;
+    for (let k = 0; k < 4; k++) {
+      const ya = Math.round(box.y - (21.7 + LINE * k) * s), yb = Math.round(box.y - (6.2 + LINE * k) * s);
+      if (ya < 0) break;
+      let orange = 0, wn = 0, x1 = -1, x2 = -1, gap = 0, done = false, darkN = 0, edge = false;
+      for (let py = ya; py < yb && !edge; py++) { let n = 0; for (let px = xa; px < xb; px += 2) { const q = (py * W + px) * 4; if (d[q] >= 170 && d[q + 1] >= 170 && d[q + 2] >= 170) n++; } if (n * 2 >= (xb - xa) * 0.6) edge = true; }
+      if (edge) break;                                         // a bright line right across: the tooltip's top edge, or we are outside it
       for (let px = xa; px < xb; px++) {
         let col = 0, org = 0;
-        for (let py = ya; py < yb; py++) { const q = (py * W + px) * 4; if (d[q] > 190 && Math.abs(d[q + 1] - 150) < 35 && d[q + 2] < 60) org++; else if (d[q] >= 200 && d[q + 1] >= 200 && d[q + 2] >= 200) col++; }
+        for (let py = ya; py < yb; py++) { const q = (py * W + px) * 4; if (d[q] > 190 && Math.abs(d[q + 1] - 150) < 40 && d[q + 2] < 70) org++; else if (d[q] >= 200 && d[q + 1] >= 200 && d[q + 2] >= 200) col++; else if (d[q] + d[q + 1] + d[q + 2] < 480) darkN++; }
         orange += org;
-        if (done) continue;
-        if (col >= (yb - ya) * 0.9) { if (wx1 >= 0) done = true; continue; }      // border line, not text
-        if (col) { if (wx1 < 0) wx1 = px; wx2 = px; wn += col; gapN = 0; } else if (wx1 >= 0 && ++gapN > maxGap) done = true;
+        if (done || col >= (yb - ya) * 0.9) continue;          // a full-height white column is the tooltip's border
+        if (col) { if (x1 < 0) x1 = px; x2 = px; wn += col; gap = 0; } else if (x1 >= 0 && ++gap > maxGap) done = true;
       }
-      if (orange > 18 * s * s) untradable = true;
-      else if (wn > 20 * s * s && !name2) name2 = { x: wx1 - 2, y: ya, w: wx2 - wx1 + 5, h: yb - ya };
+      if (darkN < (xb - xa) * (yb - ya) * 0.5) break;          // text in a tooltip sits on its dark panel
+      if (orange > 18 * s * s) { if (names.length) break; untradable = true; used++; continue; }   // orange above the name belongs to something else
+      if (wn > 20 * s * s && x2 - x1 > 10 * s) { names.unshift({ x: x1 - 2, y: ya, w: x2 - x1 + 5, h: yb - ya }); used++; continue; }
+      break;
     }
-    return { dot: { x, y, w, h, cy }, name: { x: first - 2, y: y1, w: last - first + 5, h: y2 - y1 }, name2, untradable, box, cut: box.y + box.h > H || box.x + box.w > W };
+    if (!names.length) return null;
+    return { box, names, untradable, left, top: box.y - (21.7 + LINE * (used - 1)) * s - 7 * s, cut: false };
   }
   // The tooltip shows the item's icon at twice the size. Keep a small copy of that box so the icon can be
   // matched against inventory slots later, whenever the map is ready.
@@ -249,8 +231,8 @@
     return { fp: relBg(raw, TIP_BG), badge: badgeOf(raw) };
   }
   // Greyscale crop of the name, dark text on white, enlarged for the text reader.
-  function nameImage(img, tip, scale, second) {
-    const r = second ? tip.name2 : tip.name, W = img.width, d = img.data, k = scale || 3, pad = 12;
+  function nameImage(img, r, scale) {
+    const W = img.width, d = img.data, k = scale || 3, pad = 12;
     const w = Math.max(1, Math.round(r.w)), h = Math.max(1, Math.round(r.h)), ow = w * k + pad * 2, oh = h * k + pad * 2;
     const src = new Float32Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -275,15 +257,18 @@
   function slotSame(a, b) { return a.empty === b.empty && (a.empty || (a.badge === b.badge && dist(a.fp, b.fp) <= SAME)); }
   function sameView(a, b) {
     if (!a || !b) return false;
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (!slotSame(a[r][c], b[r][c])) return false;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const x = a[r][c], y = b[r][c]; if (!!x.unk !== !!y.unk || (!x.unk && !slotSame(x, y))) return false; }
     return true;
   }
   const bits = (m) => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
   class InvMap {
     constructor() { this.rows = []; this.offset = 0; this.lost = false; this.tick = 0; this.ver = 0; }
-    // Place a clean six-row view. `pages` = true means views may arrive a whole page apart (screenshots).
+    // Place a six-row view, which may have unknown slots. `pages` = true means views may arrive a whole
+    // page apart (screenshots). Returns null when the view cannot be placed, {skip:true} when too little of it is visible.
     add(view, pages) {
       this.tick++;
+      let seen = 0; for (const row of view) for (const sl of row) if (!sl.unk) seen++;
+      if (seen < 8) return { skip: true };
       let best = null;
       if (!this.rows.length) best = { off: 0 };
       else {
@@ -291,11 +276,13 @@
           let hit = 0, near = 0, bad = 0;
           for (let r = 0; r < ROWS; r++) {
             const m = this.rows[off + r]; if (!m) continue;
-            let n = 0; for (let c = 0; c < COLS; c++) if (m[c].cur && slotSame(m[c].cur, view[r][c])) n++;
-            if (n === COLS) hit++; else if (n === COLS - 1) near++; else bad++;
+            let known = 0, same = 0;
+            for (let c = 0; c < COLS; c++) { const v = view[r][c]; if (v.unk || !m[c].cur) continue; known++; if (slotSame(m[c].cur, v)) same++; }
+            if (known < 2) continue;                              // not enough of this row is visible to say anything
+            if (same === known) hit += known / COLS; else if (known >= 4 && same === known - 1) near++; else bad++;
           }
-          // one slot in one row may differ (the mouse pointer can sit over it); anything more is a different place
-          if (bad || !hit || near > 1 || (near && hit < 2)) continue;
+          // one slot in one row may differ; anything more is a different place
+          if (bad || hit < 0.8 || near > 1 || (near && hit < 2)) continue;
           const score = hit * 100 + near * 40 - Math.abs(off - this.offset);
           if (!best || score > best.score) best = { off, score };
         }
@@ -311,7 +298,7 @@
       if (added) this.ver++;
       for (let r = 0; r < ROWS; r++) {
         if (off + r >= this.rows.length) { this.rows.push(blank()); added++; this.ver++; }
-        for (let c = 0; c < COLS; c++) this.put(this.rows[off + r][c], view[r][c], r);
+        for (let c = 0; c < COLS; c++) if (!view[r][c].unk) this.put(this.rows[off + r][c], view[r][c], r);
       }
       this.offset = off;
       return { offset: off, added };
@@ -320,14 +307,16 @@
     // positions wins, so a pointer parked over one spot cannot overwrite what was there.
     put(cell, slot, r) {
       let v = cell.alts.find((a) => slotSame(a.slot, slot));
-      if (v) { v.mask |= 1 << r; v.t = this.tick; v.slot = slot; } else cell.alts.push((v = { slot, mask: 1 << r, t: this.tick }));
+      if (v) { v.mask |= 1 << r; v.t = this.tick; v.n++; v.slot = slot; } else cell.alts.push((v = { slot, mask: 1 << r, t: this.tick, n: 1 }));
       let top = cell.alts[0];
-      for (const a of cell.alts) if (bits(a.mask) > bits(top.mask) || (bits(a.mask) === bits(top.mask) && a.t > top.t)) top = a;
+      const better = (a, b) => bits(a.mask) !== bits(b.mask) ? bits(a.mask) > bits(b.mask) : a.n !== b.n ? a.n > b.n : a.t > b.t;   // more positions, then more sightings, then newer
+      for (const a of cell.alts) if (better(a, top)) top = a;
       if (!cell.cur || !slotSame(cell.cur, top.slot)) this.ver++;
       cell.cur = top.slot;
     }
-    // Rows that hold at least one item.
+    // Rows that hold at least one item, and slots inside those rows that were never seen clearly.
     filled() { let n = 0; this.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) n = i + 1; }); return n; }
+    unseen() { const f = this.filled(); let n = 0; for (let i = 0; i < f; i++) for (const c of this.rows[i]) if (!c.cur) n++; return n; }
     // Group identical icons. Each group counts its unworn (red) and worn (purple) copies.
     groups() {
       const gs = [];

@@ -64,40 +64,43 @@
     if (!st.s) { say("Looking for your item inventory. Open it on the Deco tab."); return; }
     const tips = S.findTips(img, st.s);
     st.lastTips = tips;
-    if (tips.length) {
-      const tip = tips[0];                       // the left-most tooltip is the hovered item; any other is what you have equipped
-      if (tip.cut) { say("That tooltip runs off the edge of the shared picture. Move the inventory window up or left a little."); return; }
-      const crop = S.tipCrop(img, tip, st.s), fp = S.tipFp(crop, 0, 0).fp;
-      const h = st.hover, same = h && Math.abs(h.x - tip.dot.x) <= 3 && Math.abs(h.y - tip.dot.y) <= 3 && S.dist(h.fp, fp) < 5;
-      if (same) h.n++; else st.hover = { x: tip.dot.x, y: tip.dot.y, fp, n: 1, done: false };
-      const cur = st.hover;
-      if (cur.done || (!o.force && cur.n < 2)) return;   // wait for two matching frames so a half-drawn tooltip is never read
-      cur.done = true;
-      const badge = S.tipFp(crop, 0, 0).badge || "other";
-      const known = st.named.find((n) => S.tipDist(n.crop, crop) < TIP_SAME);
-      if (known) { known.untr[badge] = tip.untradable; beep("again"); say("Already have " + known.name + ". Nothing changed."); st.dirty = true; return; }
-      let name = "";
-      try {
-        const w = await reader(), r = await w.recognize(toCanvas(S.nameImage(img, tip, 3)));
-        let text = r.data.text, conf = r.data.confidence;
-        if (tip.name2) { const r2 = await w.recognize(toCanvas(S.nameImage(img, tip, 3, true))); text = text.trim() + " " + r2.data.text; conf = Math.min(conf, r2.data.confidence); }   // a long name wraps onto a second line
-        if (conf >= 55) name = S.snapName(S.cleanName(text), knownNames());
-      } catch (e) { say("The text reader didn't load. Check your connection and reload the page."); cur.done = false; return; }
-      if (name.length < 2) { beep("bad"); say("Couldn't read that name. Move off the item and hover it again."); cur.done = false; cur.n = 0; return; }
-      st.named.push({ name, crop, untr: { [badge]: tip.untradable } });
-      beep("fresh"); speak(name); say("Read " + name + (tip.untradable ? " (worn, can't be sold)." : "."));
-      st.dirty = true;
-      return;
-    }
-    st.hover = null;
-    if (!grid || grid.covered) { if (!st.map.rows.length) say("Looking for your item inventory. Open it on the Deco tab."); return; }
-    const rows = S.readSlots(img, grid);
-    if (!o.force && !S.sameView(rows, st.lastRows)) { st.lastRows = rows; return; }  // wait until the list has stopped moving
-    st.lastRows = rows;
-    const wasLost = st.map.lost, r = st.map.add(rows, !!o.pages);
-    if (!r) { if (!wasLost) beep("bad"); say("You scrolled further than I could follow. Scroll back toward rows I've seen, one notch at a time."); return; }
-    if (r.added) { beep("row"); st.dirty = true; }
-    if (!st.named.length || r.added || wasLost) say("Inventory found: " + st.map.filled() + " rows mapped so far. Keep scrolling to the end, then hover each different item once.");
+    // Map first: every slot that is not under a tooltip or the pointer adds to the picture of the inventory.
+    // A grid half hidden by a tooltip is still usable: prefer the last fully visible position if it has not moved.
+    const g = !grid ? null : !grid.covered ? grid : st.grid && Math.abs(grid.x0 - st.grid.x0) <= 2 && Math.abs(grid.y0 - st.grid.y0) <= 2 ? st.grid : grid;
+    if (g) {
+      const rows = S.readSlots(img, g, tips);
+      if (o.force || S.sameView(rows, st.lastRows)) {            // wait until the list has stopped moving
+        const wasLost = st.map.lost, r = st.map.add(rows, !!o.pages);
+        if (!r) { if (!wasLost) beep("bad"); if (!tips.length) say("You scrolled further than I could follow. Scroll back toward rows I've seen, one notch at a time."); }
+        else if (!r.skip) {
+          if (r.added) { beep("row"); st.dirty = true; }
+          if (!tips.length && (!st.named.length || r.added || wasLost)) say("Inventory found: " + st.map.filled() + " rows mapped so far. Keep scrolling to the end, and hover each different item once.");
+        }
+      }
+      st.lastRows = rows;
+    } else if (!tips.length && !st.map.rows.length) say("Looking for your item inventory. Open it on the Deco tab.");
+    if (!tips.length) { st.hover = null; return; }
+
+    const tip = tips[0];                         // the left-most tooltip is the hovered item; any other is what you have equipped
+    const crop = S.tipCrop(img, tip, st.s), fp = S.tipFp(crop, 0, 0).fp;
+    const h = st.hover, same = h && Math.abs(h.x - tip.box.x) <= 3 && Math.abs(h.y - tip.box.y) <= 3 && S.dist(h.fp, fp) < 5;
+    if (same) h.n++; else st.hover = { x: tip.box.x, y: tip.box.y, fp, n: 1, done: false };
+    const cur = st.hover;
+    if (cur.done || (!o.force && cur.n < 2)) return;   // wait for two matching frames so a half-drawn tooltip is never read
+    cur.done = true;
+    const badge = S.tipFp(crop, 0, 0).badge || "other";
+    const known = st.named.find((n) => S.tipDist(n.crop, crop) < TIP_SAME);
+    if (known) { known.untr[badge] = tip.untradable; beep("again"); say("Already have " + known.name + ". Nothing changed."); st.dirty = true; return; }
+    let name = "";
+    try {
+      const w = await reader(); let text = "", conf = 100;
+      for (const r of tip.names) { const x = await w.recognize(toCanvas(S.nameImage(img, r, 3))); text += " " + x.data.text.trim(); conf = Math.min(conf, x.data.confidence); }   // a long name wraps onto more lines
+      if (conf >= 55) name = S.snapName(S.cleanName(text), knownNames());
+    } catch (e) { say("The text reader didn't load. Check your connection and reload the page."); cur.done = false; return; }
+    if (name.length < 2) { beep("bad"); say("Couldn't read that name. Move off the item and hover it again."); cur.done = false; cur.n = 0; return; }
+    st.named.push({ name, crop, untr: { [badge]: tip.untradable } });
+    beep("fresh"); speak(name); say("Read " + name + (tip.untradable ? " (worn, can't be sold)." : "."));
+    st.dirty = true;
   }
 
   /* ---------- results ---------- */
@@ -122,7 +125,7 @@
     st.dirty = false;
     const res = (st.res = results()), sellRows = res.rows.filter((r) => r.g.red > 0), named = sellRows.filter((r) => r.name).length;
     $("#scanCounts").textContent = st.map.rows.length
-      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "")
+      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.unseen() ? " · " + st.map.unseen() + " slots not seen clearly yet (move the pointer off them)" : "")
       : st.named.length ? st.named.length + " names read. Scroll through the inventory with no item hovered so the items can be counted." : "";
     list.replaceChildren();
     const order = sellRows.slice().sort((a, b) => (a.name ? 1 : 0) - (b.name ? 1 : 0) || a.g.slots[0][0] - b.g.slots[0][0] || a.g.slots[0][1] - b.g.slots[0][1]);
@@ -162,7 +165,7 @@
     const s = st.s || 1; let x1 = 0, y1 = 0, x2 = f.width, y2 = f.height;
     if (st.grid) {
       x1 = st.grid.x0 - 8 * s; y1 = st.grid.y0 - 46 * s; x2 = st.grid.x0 + 211 * s; y2 = st.grid.y0 + 240 * s;
-      for (const t of st.lastTips.slice(0, 1)) { x1 = Math.min(x1, t.dot.x - 8 * s); y1 = Math.min(y1, t.name.y - 6 * s); x2 = Math.max(x2, t.box.x + 240 * s); y2 = Math.max(y2, t.box.y + t.box.h + 8 * s); }
+      for (const t of st.lastTips.slice(0, 1)) { x1 = Math.min(x1, t.left - 2 * s); y1 = Math.min(y1, t.top - 4 * s); x2 = Math.max(x2, t.left + 240 * s); y2 = Math.max(y2, t.box.y + t.box.h + 8 * s); }
       x1 = Math.max(0, x1); y1 = Math.max(0, y1); x2 = Math.min(f.width, x2); y2 = Math.min(f.height, y2);
     }
     const w = x2 - x1, h = y2 - y1, k = Math.min(520 / w, 420 / h, 1), dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -170,9 +173,9 @@
     const c = cv.getContext("2d"), z = k * dpr; c.imageSmoothingEnabled = true;
     // Dimmed on purpose: if this page is inside the shared picture, the scanner must not read its own preview.
     c.globalAlpha = 1; c.fillStyle = "#3a3a3a"; c.fillRect(0, 0, cv.width, cv.height);
-    c.globalAlpha = 0.68; c.drawImage(fc, x1, y1, w, h, 0, 0, cv.width, cv.height); c.globalAlpha = 1;
+    c.globalAlpha = 0.5; c.drawImage(fc, x1, y1, w, h, 0, 0, cv.width, cv.height); c.globalAlpha = 1;
     c.lineWidth = 2 * dpr;
-    st.lastTips.forEach((t, i) => { c.strokeStyle = i === 0 ? "#2fae68" : "rgba(160,160,160,.5)"; c.strokeRect((t.name.x - x1) * z, (t.name.y - y1) * z, t.name.w * z, t.name.h * z); if (t.name2) c.strokeRect((t.name2.x - x1) * z, (t.name2.y - y1) * z, t.name2.w * z, t.name2.h * z); if (i === 0) c.strokeRect((t.box.x - x1) * z, (t.box.y - y1) * z, t.box.w * z, t.box.h * z); });
+    st.lastTips.forEach((t, i) => { c.strokeStyle = i === 0 ? "#2fae68" : "rgba(160,160,160,.5)"; for (const r of t.names) c.strokeRect((r.x - x1) * z, (r.y - y1) * z, r.w * z, r.h * z); if (i === 0) c.strokeRect((t.box.x - x1) * z, (t.box.y - y1) * z, t.box.w * z, t.box.h * z); });
   }
 
   /* ---------- frame sources ---------- */

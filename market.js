@@ -16,12 +16,21 @@
   function crateStats() {
     if (stats && statsFor === prices.asOf + Object.keys(catalog).length) return stats;
     const by = {};
-    for (const s in catalog) { const c = catalog[s], pr = prices.items[s]; if (!c.c || !pr || !(pr.p > 0)) continue; (by[c.c] = by[c.c] || []).push(pr); }
+    const odds = {}, size = {};
+    for (const s in catalog) {
+      const c = catalog[s], pr = prices.items[s]; if (!c.c) continue;
+      size[c.c] = (size[c.c] || 0) + 1; const r = parseFloat(c.r); if (r > 0) (odds[c.c] = odds[c.c] || []).push(r);
+      if (!pr || !(pr.p > 0)) continue; (by[c.c] = by[c.c] || []).push(pr);
+    }
     stats = {};
     for (const k in by) {
       const ps = by[k].map((x) => x.p).sort((a, b) => a - b), half = ps.slice(0, Math.max(1, ps.length >> 1));
       const ls = by[k].map((x) => x.l).filter((x) => x > 0).sort((a, b) => a - b);
-      stats[k] = { floor: half[half.length >> 1], scarce: ls.length >= 10 ? ls[Math.floor(ls.length / 10)] : 0, n: ps.length };
+      // The common tier, by published drop rate: the most common rate, plus the next one down while the tier
+      // holds fewer than ten items. Only worked out when nearly every item in the crate has a rate saved.
+      let common = null; const rs = (odds[k] || []).sort((a, b) => b - a);
+      if (rs.length >= size[k] * 0.9) { common = rs[0]; while (rs.filter((x) => x >= common).length < 10 && rs.some((x) => x < common)) common = rs.find((x) => x < common); }
+      stats[k] = { floor: half[half.length >> 1], scarce: ls.length >= 10 ? ls[Math.floor(ls.length / 10)] : 0, n: ps.length, common };
     }
     statsFor = prices.asOf + Object.keys(catalog).length;
     return stats;
@@ -38,13 +47,17 @@
     }
     return typeof pr.tr === "number" ? pr.tr : null;
   }
-  // "Trash": a crate item sitting at its crate's floor with nothing pointing up: no hand-set plan, not
-  // rising, and not one of the crate's scarcest. These are the cheapest things to use up or trade in.
+  // "Trash": a crate item from the common drop tier that sits at its crate's floor with nothing pointing
+  // up. Needs no hand-set plan, a price within 10% of the floor, and no rise over the week. Where the crate's
+  // drop rates are saved the item must be in the common tier; a rarer piece is never trash, however cheap.
+  // Where they are not saved yet, the item must at least not be among the crate's least-listed tenth.
   function trash(c, pr, today) {
     if (!c || !c.c || !pr || !(pr.p > 0) || c.plan || c.buy || c.sell) return false;
     const st = crateStats()[c.c]; if (!st) return false;
-    const tr = trend7(pr, today);
-    return pr.p <= st.floor * 1.2 && !(tr > 0.1) && !(st.scarce && pr.l > 0 && pr.l <= st.scarce);
+    if (pr.p > st.floor * 1.1 || trend7(pr, today) > 0.1) return false;
+    if (st.common) return parseFloat(c.r) >= st.common;
+    if (parseFloat(c.r) < 2) return false;                        // a saved rate from a rare tier rules it out even without the full table
+    return !(st.scarce && pr.l > 0 && pr.l <= st.scarce);
   }
   const pctTxt = (x) => Math.round(Math.abs(x) * 100) + "%";
 

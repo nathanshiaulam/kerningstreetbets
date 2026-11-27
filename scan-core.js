@@ -166,19 +166,29 @@
   // is always there. The lines above it are the name (one or more white lines) and, for a worn item,
   // an orange "Untradable" line directly above the square.
   const BOX = 67.2, LINE = 14.4;
+  // The square is slightly see-through, so its colour shifts with what is behind it and with the display's
+  // colour settings: accept the whole family of pale blue-greys rather than one colour.
+  const isPale = (r, g, b) => r >= 150 && r <= 226 && g >= 150 && g <= 226 && b >= 168 && b <= 238 && b - r >= 4 && b - r <= 40 && Math.abs(r - g) <= 14;
   function findTips(img, s) {
-    const W = img.width, H = img.height, d = img.data, B = BOX * s, e = Math.max(2, Math.round(1.5 * s));
-    const pale = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = ((y | 0) * W + (x | 0)) * 4; return Math.abs(d[k] - TIP_BG[0]) < 26 && Math.abs(d[k + 1] - TIP_BG[1]) < 26 && Math.abs(d[k + 2] - TIP_BG[2]) < 26; };
+    const W = img.width, H = img.height, d = img.data, B = BOX * s, e = Math.max(2, Math.round(1.5 * s)), t1 = Math.max(1, Math.floor(0.9 * s));   // t1: the thin margin between the square's edge and the icon
+    const pale = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = ((y | 0) * W + (x | 0)) * 4; return isPale(d[k], d[k + 1], d[k + 2]); };
     const frac = (x1, y1, x2, y2) => { let n = 0, t = 0; const sx = Math.max(1, (x2 - x1) / 24), sy = Math.max(1, (y2 - y1) / 24); for (let y = y1; y < y2; y += sy) for (let x = x1; x < x2; x += sx) { t++; if (pale(x, y)) n++; } return t ? n / t : 0; };
     const boxes = [];
     for (let y = e; y < H - B; y++) for (let x = e; x < W - B; x++) {
       const k = (y * W + x) * 4;
-      if (Math.abs(d[k + 2] - TIP_BG[2]) >= 26 || !pale(x, y) || pale(x - e, y) || pale(x, y - e) || !pale(x + e, y + e)) continue;   // a top-left corner
+      if (d[k + 2] < 168 || !pale(x, y) || pale(x - e, y) || pale(x, y - e) || !pale(x + 1, y) || !pale(x, y + 1)) continue;   // a top-left corner
       if (boxes.some((b) => Math.abs(b.x - x) < B * 0.6 && Math.abs(b.y - y) < B * 0.6)) continue;
       // The icon can touch any edge, so ask for the three edges together rather than each one fully.
-      const fl = frac(x, y, x + e, y + B), ft = frac(x, y, x + B, y + e), fr = frac(x + B - e, y, x + B, y + B * 0.6);
-      if (fl < 0.3 || ft < 0.3 || fr < 0.3 || fl + ft + fr < 1.6) continue;
-      if (frac(x - 2 * e, y, x - e, y + B) > 0.2 || frac(x, y - 2 * e, x + B, y - e) > 0.2 || frac(x + B + e, y, x + B + 2 * e, y + B) > 0.3) continue;   // dark panel outside
+      // The square's exact width depends on the scaling (sharp at whole-number scales, a pixel smaller
+      // when edges are blended), so look for its right edge instead of assuming it.
+      // Right edge: the last column before the tooltip's dark panel resumes. (At low resolution a bright
+      // icon bleeds into the thin margin, so the margin itself cannot be relied on.)
+      const darkCol = (cx) => { let n = 0, t = 0; for (let py = y + 2; py < y + B * 0.9; py += Math.max(1, s)) { const q = ((py | 0) * W + cx) * 4; t++; if (d[q] + d[q + 1] + d[q + 2] < 400) n++; } return n / t; };
+      let re = -1; for (let cx = Math.round(x + 60 * s); cx <= x + 74 * s && cx + 1 < W; cx++) if (darkCol(cx + 1) >= 0.8 && darkCol(cx) < 0.8) re = cx;
+      if (re < x + 62 * s) continue;
+      const fl = frac(x, y, x + t1, y + B - 1), ft = frac(x, y, re, y + t1);
+      if (fl < 0.3 || ft < 0.3 || fl + ft < 1.0) continue;
+      if (frac(x - 2 * e, y, x - e, y + B) > 0.2 || frac(x, y - 2 * e, x + B, y - e) > 0.2) continue;   // dark panel outside
       if (frac(x, y, x + B, y + B) < 0.08) continue;                                                    // a big dark icon can fill most of the square
       boxes.push({ x, y, w: B, h: B });
     }
@@ -236,11 +246,17 @@
     const w = Math.min(img.width - x, Math.ceil(b.w) + 2 * m), h = Math.min(img.height - y, Math.ceil(b.h) + 2 * m);
     const data = new Uint8ClampedArray(w * h * 4);
     for (let r = 0; r < h; r++) data.set(img.data.subarray(((y + r) * img.width + x) * 4, ((y + r) * img.width + x + w) * 4), r * w * 4);
-    return { img: { data, width: w, height: h }, ox: b.x - x, oy: b.y - y, s };
+    const rs = [], gs = [], bs = [];                      // the square's own colour, from its top and left margins
+    for (let i = 2; i < b.w - 2; i++) for (const [px, py] of [[Math.round(b.x + i), Math.round(b.y)], [Math.round(b.x), Math.round(b.y + i)]]) {
+      if (px >= img.width || py >= img.height) continue; const k = (py * img.width + px) * 4;
+      if (isPale(img.data[k], img.data[k + 1], img.data[k + 2])) { rs.push(img.data[k]); gs.push(img.data[k + 1]); bs.push(img.data[k + 2]); }
+    }
+    const med = (a) => a.sort((p, q) => p - q)[a.length >> 1];
+    return { img: { data, width: w, height: h }, ox: b.x - x, oy: b.y - y, s, bg: rs.length > 8 ? [med(rs), med(gs), med(bs)] : TIP_BG };
   }
   function tipFp(crop, dx, dy) {
     const s = crop.s, raw = sample(crop.img, crop.ox + (1.6 + (dx || 0)) * s, crop.oy + (3.1 + (dy || 0)) * s, 64 * s, 64 * s, N, N);
-    return { fp: relBg(raw, TIP_BG), badge: badgeOf(raw) };
+    return { fp: relBg(raw, crop.bg || TIP_BG), badge: badgeOf(raw) };
   }
   // Greyscale crop of the name, dark text on white, enlarged for the text reader.
   function nameImage(img, r, scale) {
@@ -342,14 +358,26 @@
       return gs;
     }
   }
+  // Tooltip icon against slot icon. A cell is either solid icon, where both show the same colour, or
+  // see-through, where each shows its own background. Take whichever reading fits better, cell by cell.
+  function distTip(t, g, delta) {
+    let tot = 0, n = 0;
+    for (let i = 0; i < N * N; i++) {
+      if (inBadge(i)) continue;
+      const o = i * 3, a = t[o] - g[o], b = t[o + 1] - g[o + 1], c = t[o + 2] - g[o + 2];
+      tot += Math.min(Math.abs(a) + Math.abs(b) + Math.abs(c), Math.abs(a + delta[0]) + Math.abs(b + delta[1]) + Math.abs(c + delta[2])); n += 3;
+    }
+    return tot / n;
+  }
   // Best group for a saved tooltip icon. The tooltip draws a different cut of the icon than the slot does,
   // offset by a few pixels that vary from item to item, so search a wide range of shifts coarsely and
   // then finely around the best one. Returns clear = false unless one group stands out.
   function matchTip(crop, groups) {
     const per = new Float32Array(groups.length).fill(Infinity); let bd = Infinity, bx = 0, by = 0;
+    const bg = crop.bg || TIP_BG, delta = [bg[0] - SLOT_BG[0], bg[1] - SLOT_BG[1], bg[2] - SLOT_BG[2]];
     const tryAt = (dx, dy) => {
       const t = tipFp(crop, dx, dy).fp;
-      for (let k = 0; k < groups.length; k++) { const dd = dist(t, groups[k].fp); if (dd < per[k]) per[k] = dd; if (dd < bd) { bd = dd; bx = dx; by = dy; } }
+      for (let k = 0; k < groups.length; k++) { const dd = distTip(t, groups[k].fp, delta); if (dd < per[k]) per[k] = dd; if (dd < bd) { bd = dd; bx = dx; by = dy; } }
     };
     for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) tryAt(dx, dy);
     const cx = bx, cy = by;

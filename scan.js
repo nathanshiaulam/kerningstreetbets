@@ -94,7 +94,7 @@
     let name = "";
     try {
       const w = await reader(); let text = "", conf = 100;
-      for (const r of tip.names) { const x = await w.recognize(toCanvas(S.nameImage(img, r, 3))); text += " " + x.data.text.trim(); conf = Math.min(conf, x.data.confidence); }   // a long name wraps onto more lines
+      for (const r of tip.names) { const x = await w.recognize(toCanvas(S.nameImage(img, r, Math.max(3, Math.round(6 / st.s))))); text += " " + x.data.text.trim(); conf = Math.min(conf, x.data.confidence); }   // a long name wraps onto more lines
       if (conf >= 55) name = S.snapName(S.cleanName(text), knownNames());
     } catch (e) { say("The text reader didn't load. Check your connection and reload the page."); cur.done = false; return; }
     if (name.length < 2) { beep("bad"); say("Couldn't read that name. Move off the item and hover it again."); cur.done = false; cur.n = 0; return; }

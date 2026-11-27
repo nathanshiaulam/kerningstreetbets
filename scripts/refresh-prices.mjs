@@ -1,5 +1,5 @@
 // Refreshes data/prices.json from the tracker's public market.json (one request for every item).
-// Runs in GitHub Actions. Writes data/refresh-log.json so each run can be checked.
+// Runs in GitHub Actions every three hours. Writes data/refresh-log.json so each run can be checked.
 // A price read by hand from Cozy Market (field t) is kept for 18 hours before the tracker may replace it;
 // the tracker still supplies the daily history and seller counts for those items.
 import fs from "node:fs";

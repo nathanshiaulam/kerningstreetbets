@@ -15,7 +15,7 @@
   const say = (t) => { const n = $("#scanStatus"); if (n.textContent !== t) n.textContent = t; };
   function beep(kind) {
     if (!$("#scanSound").checked || !st.ac) return;
-    const plan = { fresh: [[660, 0, 0.09], [990, 0.1, 0.14]], again: [[300, 0, 0.14]], row: [[1200, 0, 0.03]], bad: [[180, 0, 0.22]] }[kind] || [];
+    const plan = { fresh: [[660, 0, 0.09], [990, 0.1, 0.14]], again: [[300, 0, 0.14]], row: [[1200, 0, 0.03]], bad: [[180, 0, 0.22]], hide: [[520, 0, 0.07], [520, 0.13, 0.07]] }[kind] || [];
     for (const [f, at, len] of plan) {
       const o = st.ac.createOscillator(), g = st.ac.createGain(), t = st.ac.currentTime + at;
       o.type = kind === "bad" ? "sawtooth" : "sine"; o.frequency.value = f;
@@ -82,15 +82,32 @@
     const rows = S.readSlots(img, g, tips, !!o.pages);
     const firm = !!o.force || S.sameView(rows, st.lastRows);     // seen twice running: the list has stopped moving
     st.lastRows = rows;
-    const r = st.map.add(rows, !!o.pages, firm);
+    const ver = st.map.ver, r = st.map.add(rows, !!o.pages, firm);
+    if (st.map.ver !== ver) st.dirty = true;                     // any slot that changed, not only new rows, refreshes the list
     if (!r || r.skip) return true;
+    // Slots under the pop-up or pointer that have never been seen: once the list has rested a moment, say so,
+    // with a sound, since the player is looking at the game and not at this page.
+    if (firm && !o.pages) {
+      let hid = 0; const seg = st.map.rows, now = performance.now();
+      for (let i = 0; i < S.ROWS; i++) {
+        const row = seg[r.offset + i]; if (!row || !row.some((x) => x.cur && !x.cur.empty)) continue;   // rows with no item showing are the empty tail
+        for (let c = 0; c < S.COLS; c++) if (rows[i][c].unk && !row[c].cur) hid++;
+      }
+      const key = st.map.at + ":" + r.offset + ":" + hid;
+      if (!hid) st.hid = null;
+      else if (!st.hid || st.hid.key !== key) st.hid = { key, t: now, told: false };
+      else if (!st.hid.told && now - st.hid.t > 600) {
+        st.hid.told = true; beep("hide"); speak("Move the pointer off the items");
+        say("The pop-up is hiding " + hid + (hid === 1 ? " slot" : " slots") + " here. Slide the pointer off the items for a second.");
+      }
+    }
     if (r.fresh) { beep("bad"); say("You scrolled faster than I could follow, so there's a gap. Scroll back through the rows you skipped and I'll join them up."); st.dirty = true; return true; }
     if (r.added || r.joined) {
       st.dirty = true;
       const now = performance.now(); if (now - (st.lastBeep || 0) > 150) { st.lastBeep = now; beep("row"); }
     }
     if (r.joined && !st.map.gaps) say("Joined up. " + st.map.filled() + " rows mapped so far. Keep scrolling to the end.");
-    else if (!tips.length && !st.map.gaps && (!st.named.length || r.added)) say("Inventory found: " + st.map.filled() + " rows mapped so far. Keep scrolling to the end.");
+    else if (!tips.length && !st.map.gaps && !(st.hid && st.hid.told) && (!st.named.length || r.added)) say("Inventory found: " + st.map.filled() + " rows mapped so far. Keep scrolling to the end.");
     return true;
   }
   // The quick path, for the frames between full looks: only the inventory's corner of the picture is read,

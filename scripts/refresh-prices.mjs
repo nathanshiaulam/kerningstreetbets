@@ -50,6 +50,13 @@ try {
     const e = prices.items[slug] || (prices.items[slug] = {});
     if (e.p && (it.p > e.p * 20 || it.p < e.p / 20)) { log.implausible = (log.implausible || []).concat([[c.n, e.p, it.p]]).slice(0, 20); continue; }
     if (it.sellers != null) e.s = it.sellers;
+    // What it actually sells for, from the tracker's record of sales. Kept even while a Cozy price is held:
+    // the middle half of sale prices, the sale median, the share of listings that sold, and sales a day.
+    if (it.p25 > 0 && it.p75 > 0) e.q = [Math.round(it.p25), Math.round(it.p75)];
+    e.sp = Math.round(it.p);
+    if (it.st != null) e.st = it.st;
+    const days = (it.h || []).filter((r) => Array.isArray(r) && r[2] > 0).slice(0, -1).slice(-7);   // the newest day is still filling in
+    if (days.length) e.v = Math.round((days.reduce((a, r) => a + r[2], 0) / days.length) * 10) / 10;
     const held = e.t && now - new Date(e.t) < HOLD_MS, heldTag = held ? tag(e.t) : null;
     const pts = new Map((e.h || "").split(" ").filter(Boolean).map((x) => x.split(":")));
     for (const row of it.h || []) {

@@ -184,6 +184,14 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
 .view-buys .pf-only{display:none!important}
 .buys-body{display:flex;flex-direction:column;gap:30px}
 .buy-list{display:flex;flex-direction:column}
+.look{display:flex;flex-direction:column;gap:14px}
+.look-in{flex:1;max-width:340px}
+.look-name{font-family:var(--display);font-size:34px;line-height:1;font-weight:800;letter-spacing:.01em}
+.look .chart svg{max-height:230px}
+.facts{display:flex;flex-direction:column}
+.fact{display:grid;grid-template-columns:150px minmax(0,1fr);gap:4px 16px;border-top:1px solid var(--line);padding:9px 0;font-size:14px;line-height:1.5}
+.fact b{font-weight:700}.fact span{max-width:70ch}
+@media (max-width:560px){.fact{grid-template-columns:1fr}}
 .buy{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;padding:10px 0;border-top:1px solid var(--line)}
 .buy .nm span{font-size:13px;line-height:1.45;max-width:72ch}
 .buy .num b{font-family:var(--display);font-size:26px;line-height:1;font-weight:800;letter-spacing:.01em}
@@ -247,7 +255,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
       <div class="scan-left">
         <canvas id="scanPreview" width="10" height="10" aria-label="What the scanner sees"></canvas>
         <ol class="scan-steps">
-          <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row at your normal speed. Rest the pointer on the bottom row so the item pop-up stays clear of the rows above. A soft tick means new rows were added; a low beep means you got ahead of it, and it will ask you to scroll back.</li>
+          <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row at your normal speed. The item pop-up hides whatever is under it, so rest the pointer on the bottom-right slot, or anywhere in the window that isn't an item. A soft tick means new rows were added. A double beep means the pop-up is hiding slots: slide the pointer aside for a second. A low beep means you got ahead of it, and it will ask you to scroll back.</li>
           <li><b>Check.</b> Items are named from their icons as rows appear. Hover only the ones left unnamed, or any that look wrong: a hover always wins.</li>
           <li><b>Sync.</b> When the list looks right, sync. Copies are counted for you.</li>
         </ol>
@@ -271,6 +279,12 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
   </section>
 
   <div class="buys-only" id="buys">
+    <section class="panel card" id="lookup">
+      <h3>Where an item sits</h3>
+      <p>Pick any cash item to see its price against its own history, its crate, and what it has actually been selling for.</p>
+      <div class="line"><label for="lookIn">Item</label><input class="in look-in" id="lookIn" list="lookList" placeholder="Start typing a name" autocomplete="off"><datalist id="lookList"></datalist></div>
+      <div id="lookBody" class="look"></div>
+    </section>
     <section class="panel card">
       <h3>Good buys</h3>
       <p>Crate items the market may be underpricing, found by five screens over today's prices, each crate's end date, a week of price change, and how many listings exist. They are rules of thumb from how earlier crates behaved, not predictions. Check the item in game before you spend.</p>
@@ -414,7 +428,7 @@ function view(h) {
   if (my && my.p && (!prices.asOf || my.at > prices.asOf)) { prev = p; p = my.p; mine = true; }
   const sig = signalFor(c, p, todayStr(), !!h.slug);
   if (c && c.auto && sig.key !== "name") sig.auto = true;
-  return { h, c, pr, hist, p, prev, mine, sig, val: p != null ? p * h.qty : null, day: p != null && prev ? p / prev - 1 : null, peak: hist.length ? Math.max(p || 0, ...hist.map((x) => x[1])) : p };
+  return { h, c, pr, hist, p, prev, mine, sig, trash: !mine && !!h.slug && KSBMarket.trash(catalog[h.slug], pr, todayStr()), val: p != null ? p * h.qty : null, day: p != null && prev ? p / prev - 1 : null, peak: hist.length ? Math.max(p || 0, ...hist.map((x) => x[1])) : p };
 }
 
 /* ---------- saving (this browser only) ---------- */
@@ -464,7 +478,7 @@ function render() {
   const pc = $("#pfChart"); pc.replaceChildren();
   if (series.length >= 2) pc.append(chart({ hist: series, h: { name: "your portfolio" } }, "Value of the items you hold now"), el("div", { class: "msg", text: "What the items you hold today were worth on each day. Days before an item's first saved price use that first price." }));
   else if (priced.length) pc.append(el("div", { class: "msg", text: "The value chart appears once there are two days of prices." }));
-  KSBMarket.renderBuys();
+  KSBMarket.renderBuys(); renderLookup();
 
   const bar = $("#planbar"), leg = $("#legend"); bar.replaceChildren(); leg.replaceChildren();
   for (const b of BUCKETS) {
@@ -483,7 +497,9 @@ function render() {
     const n = k === "all" ? vs.length : vs.filter((v) => v.sig.key === k).length;
     chips.append(el("button", { class: "chip", "aria-pressed": String(filter === k), text: label + " " + n, onclick: () => { filter = k; render(); } }));
   }
-  const shown = vs.filter((v) => filter === "all" || v.sig.key === filter).sort((a, b) => (b.val == null ? -1 : b.val) - (a.val == null ? -1 : a.val));
+  const junk = vs.filter((v) => v.trash);
+  if (junk.length || filter === "trash") chips.append(el("button", { class: "chip", "aria-pressed": String(filter === "trash"), title: "Crate items sitting at their crate's floor with nothing pointing up", text: "Trash NX " + junk.reduce((a, v) => a + v.h.qty, 0), onclick: () => { filter = "trash"; render(); } }));
+  const shown = vs.filter((v) => filter === "all" || (filter === "trash" ? v.trash : v.sig.key === filter)).sort((a, b) => (b.val == null ? -1 : b.val) - (a.val == null ? -1 : a.val));
   const rows = $("#rows"); rows.replaceChildren();
   if (!pf.holdings.length) rows.append(el("div", { class: "empty", text: "No holdings yet. Scan your inventory, import a portfolio file, or add items by name below." }));
   else if (!shown.length) rows.append(el("div", { class: "empty", text: "Nothing in this group." }));
@@ -498,7 +514,7 @@ function render() {
 function bucketColor(key) { const b = BUCKETS.find((x) => x.key === key); return b ? b.color : "var(--ink2)"; }
 function rowFor(v) {
   const h = v.h, c = v.c;
-  const sub = el("span", null, c && c.c ? el("i", { class: "tag", style: "font-style:normal", text: c.c }) : null, h.ok === false ? el("i", { class: "tag warn", style: "font-style:normal", text: h.slug ? "CONFIRM NAME" : "UNNAMED" }) : null, "×" + h.qty + (v.p != null && h.qty > 1 ? " · " + kfmt(v.val) + " total" : ""));
+  const sub = el("span", null, c && c.c ? el("i", { class: "tag", style: "font-style:normal", text: c.c }) : null, h.ok === false ? el("i", { class: "tag warn", style: "font-style:normal", text: h.slug ? "CONFIRM NAME" : "UNNAMED" }) : null, v.trash ? el("i", { class: "tag", style: "font-style:normal", text: "TRASH" }) : null, "×" + h.qty + (v.p != null && h.qty > 1 ? " · " + kfmt(v.val) + " total" : ""));
   return el("button", { class: "row", "data-id": h.id, onclick: () => { sel = h.id; render(); if (window.matchMedia("(max-width:860px)").matches) $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }); } },
     el("div", { class: "who" }, h.icon ? el("img", { class: "ico", src: h.icon, alt: "" }) : null, el("div", { class: "nm" }, el("b", { text: h.name }), sub)),
     el("div", { class: "spark" }, spark(v.hist)),
@@ -557,6 +573,7 @@ function renderDetail(v) {
   add("You hold", "×" + h.qty + (v.val != null ? " · " + full(v.val) : ""));
   add("Peak seen", v.peak ? full(v.peak) + (v.p ? " (" + pct(v.p / v.peak - 1) + ")" : "") : null);
   add("Sellers on tracker", v.pr && v.pr.s != null ? String(v.pr.s) : null);
+  add("Trash NX", v.trash ? "Yes: at its crate's floor, nothing pointing up" : null);
   add("Price source", v.p == null ? null : v.mine ? "Your in-game price" : v.pr && v.pr.t ? "Cozy Market, " + timeStr(v.pr.t) : "Tracker sale median");
   if (c) { add("Supply ends", c.e ? shortDate(c.e) : null); add("Buy at or below", c.buy ? full(c.buy) : null); add("Sell at or above", c.sell ? full(c.sell) : null); add("Review by", c.reviewBy ? shortDate(c.reviewBy) + " · floor " + kfmt(c.floor) : null); }
   d.append(kv);
@@ -616,7 +633,7 @@ $("#copyBtn").addEventListener("click", async () => {
 });
 
 /* ---------- update and reset ---------- */
-const BUILD = "2026-11-26 22:10 PT";
+const BUILD = "2026-11-26 23:40 PT";
 async function freshReload() {
   // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
   const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];
@@ -684,8 +701,79 @@ async function liveTracker() {
   }
   if (n) { prices.live = pack.updatedAt || new Date(pack.at).toISOString(); priceStatus(); render(); }
 }
+/* ---------- where an item sits ---------- */
+const LOOK = "ksb.lookup.v1";
+const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+// Plain facts about one item, each built from saved data. Returns [heading, sentence] pairs.
+function sits(v) {
+  const out = [], slug = v.h.slug, c = catalog[slug] || {}, pr = v.pr || {}, p = v.p, today = todayStr();
+  if (v.hist.length > 1 && p) {
+    let lo = v.hist[0], hi = v.hist[0];
+    for (const x of v.hist) { if (x[1] < lo[1]) lo = x; if (x[1] >= hi[1]) hi = x; }
+    out.push(["Its own range", "Over the " + v.hist.length + " days on record it has gone from " + kfmt(lo[1]) + " (" + shortDate(lo[0]) + ") to " + kfmt(hi[1]) + " (" + shortDate(hi[0]) + "). Today's " + kfmt(p) + " is "
+      + (p >= hi[1] ? "the high." : Math.round((1 - p / hi[1]) * 100) + "% under the high and " + (p / lo[1] >= 2 ? (p / lo[1]).toFixed(1) + " times the low." : Math.round((p / lo[1] - 1) * 100) + "% over the low."))]);
+  }
+  if (c.c) {
+    const same = Object.keys(catalog).filter((k) => catalog[k].c === c.c && prices.items[k] && prices.items[k].p > 0).sort((a, b) => prices.items[b].p - prices.items[a].p);
+    const rank = same.indexOf(slug) + 1, cr = crates[c.c] || {}, end = c.e || cr.end, cs = KSBMarket.crateStats()[c.c];
+    const days = end ? Math.round((new Date(today + "T12:00:00") - new Date(end + "T12:00:00")) / 864e5) : 0;
+    out.push(["Its crate", (cr.name || c.c) + (!end ? "." : end < today ? " closed on " + shortDate(end) + ", " + days + " days ago, so no new copies are coming from it." : " is open until " + shortDate(end) + ", so new copies keep arriving.")
+      + (rank ? " This is the " + (rank === 1 ? "" : nth(rank) + " ") + "most expensive of its " + same.length + " items" + (cs ? "; the common ones sit near " + kfmt(cs.floor) + "." : ".") : "")]);
+  }
+  if (pr.q) out.push(["What it sells for", "Half of the recorded sales fell between " + kfmt(pr.q[0]) + " and " + kfmt(pr.q[1]) + (pr.sp ? ", with the middle sale at " + kfmt(pr.sp) : "") + "."
+    + (pr.v ? " About " + (pr.v >= 10 ? Math.round(pr.v) : pr.v) + " sell a day" + (pr.st != null ? ", and " + Math.round(pr.st * 100) + "% of the listings the tracker saw ended in a sale." : ".") : "")
+    + (prices.tracker && prices.tracker.updatedAt ? " Market tracker, " + shortDate(prices.tracker.updatedAt) + "." : "")]);
+  const sh = pr.sh;
+  if (sh) out.push(["Asked against paid", "Shops were asking about " + kfmt(sh.ask) + ", the cheapest " + kfmt(sh.askLo) + ". The last " + sh.n + " sales went for " + kfmt(sh.soldLo) + " to " + kfmt(sh.soldHi) + ", mostly around " + kfmt(sh.sold)
+    + ". That puts asking prices " + Math.round((sh.ask / sh.sold - 1) * 100) + "% above what buyers paid. Read from Cozy Market, " + timeStr(sh.t) + "."]);
+  else if (pr.q && p > pr.q[1] * 1.03) out.push(["Asked against paid", "The usual shop price (" + kfmt(p) + ") is above where sales have landed (" + kfmt(pr.q[0]) + " to " + kfmt(pr.q[1]) + "), so shops are asking more than buyers have been paying."]);
+  return out;
+}
+function renderLookup() {
+  const input = $("#lookIn"), body = $("#lookBody"); if (!input || !Object.keys(catalog).length) return;
+  const list = $("#lookList");
+  if (!list.children.length) for (const k of Object.keys(catalog).sort((a, b) => catalog[a].n.localeCompare(catalog[b].n))) list.append(el("option", { value: catalog[k].n }));
+  let slug = (/^#buys\/([a-z0-9-]+)$/.exec(location.hash) || [])[1];
+  try { if (slug && catalog[slug]) localStorage.setItem(LOOK, slug); else slug = localStorage.getItem(LOOK); } catch (e) {}
+  body.replaceChildren();
+  if (!slug || !catalog[slug]) return;
+  const c = catalog[slug], v = view({ slug, name: c.n, qty: 1, ok: true }), pr = v.pr || {}, today = todayStr();
+  if (document.activeElement !== input) input.value = c.n;
+  body.append(el("div", null, el("div", { class: "eyebrow", text: [c.c, c.r, c.f].filter(Boolean).join(" · ") || "Cash item" }), el("div", { class: "look-name", text: c.n })));
+  if (v.p == null) { body.append(el("div", { class: "msg", text: "No price is saved for this item yet." })); return; }
+  const tr = KSBMarket.trend7(pr, today);
+  body.append(el("div", { class: "price-line" }, el("b", { text: full(v.p) }), tr != null ? el("span", { class: "delta " + (tr > 0 ? "up" : tr < 0 ? "down" : "flat"), text: (tr > 0 ? "▲ " : tr < 0 ? "▼ " : "") + pct(tr) + " in 7 days" }) : null));
+  body.append(chart(v));
+  // the buyer's side, in one box
+  const sh = pr.sh, lines = [];
+  if (sh) lines.push("Aim for about " + kfmt(sh.sold) + ", the price it has been selling at, not the " + kfmt(sh.ask) + " most shops ask.");
+  else if (pr.q) lines.push("Recent sales landed between " + kfmt(pr.q[0]) + " and " + kfmt(pr.q[1]) + "; a shop priced above that is asking more than buyers have paid.");
+  if (c.buy) lines.push("Its saved buy level is " + kfmt(c.buy) + ". Today's price is " + (v.p <= c.buy ? "at or under it." : Math.round((v.p / c.buy - 1) * 100) + "% above it."));
+  if (c.note) lines.push(c.note);
+  if (lines.length) body.append(el("div", { class: "why" }, el("b", { text: "If you're buying" }), lines.join(" "), el("div", { class: "auto", text: "Rules of thumb from saved prices, not a prediction. Check the shops in game before you spend." })));
+  const facts = el("div", { class: "facts" });
+  for (const [k, t] of sits(v)) facts.append(el("div", { class: "fact" }, el("b", { text: k }), el("span", { text: t })));
+  body.append(facts);
+  const kv = el("div", { class: "kv" });
+  const add = (k, val) => { if (val != null && val !== "") kv.append(el("div", null, el("span", { text: k }), el("b", { text: val }))); };
+  const held = pf.holdings.find((h) => h.slug === slug);
+  add("If you hold one", v.sig.label + (c.sell ? " · sell at " + kfmt(c.sell) : ""));
+  add("You hold", held ? "×" + held.qty : "None");
+  add("Price source", pr.t ? "Cozy Market, " + timeStr(pr.t) : "Tracker sale median");
+  add("Shops seen selling it", pr.s != null ? String(pr.s) : null);
+  body.append(kv);
+}
+function lookPick() {
+  const name = $("#lookIn").value.trim().toLowerCase(); if (!name) return;
+  const slug = Object.keys(catalog).find((k) => catalog[k].n.toLowerCase() === name); if (!slug) return;
+  try { localStorage.setItem(LOOK, slug); } catch (e) {}
+  if (location.hash !== "#buys/" + slug) location.hash = "#buys/" + slug; else renderLookup();
+}
+$("#lookIn").addEventListener("change", lookPick); $("#lookIn").addEventListener("input", lookPick);
+$("#lookIn").addEventListener("focus", (e) => e.target.select());
 function route() {
-  const buys = location.hash === "#buys";
+  const buys = /^#buys(\/|$)/.test(location.hash);
+  if (buys) renderLookup();
   document.body.classList.toggle("view-buys", buys);
   $("#navPf").setAttribute("aria-current", buys ? "false" : "page"); $("#navBuys").setAttribute("aria-current", buys ? "page" : "false");
   if (buys) window.scrollTo(0, 0);

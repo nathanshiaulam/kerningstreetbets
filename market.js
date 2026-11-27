@@ -31,12 +31,20 @@
     if (!pr) return null;
     const h = parseHist(pr.h);
     if (h.length >= 2) {
-      const cut = addDays(today, -7); let old = h[0];
+      // a week back from the newest saved day (saved days are UTC, so the reader's own date can be a day behind)
+      const last = h[h.length - 1], cut = addDays(last[0], -7); let old = h[0];
       for (const x of h) if (x[0] <= cut) old = x;
-      const last = h[h.length - 1];
       if (old !== last && daysBetween(old[0], last[0]) >= 3 && old[1] > 0) return (pr.p || last[1]) / old[1] - 1;
     }
     return typeof pr.tr === "number" ? pr.tr : null;
+  }
+  // "Trash": a crate item sitting at its crate's floor with nothing pointing up: no hand-set plan, not
+  // rising, and not one of the crate's scarcest. These are the cheapest things to use up or trade in.
+  function trash(c, pr, today) {
+    if (!c || !c.c || !pr || !(pr.p > 0) || c.plan || c.buy || c.sell) return false;
+    const st = crateStats()[c.c]; if (!st) return false;
+    const tr = trend7(pr, today);
+    return pr.p <= st.floor * 1.2 && !(tr > 0.1) && !(st.scarce && pr.l > 0 && pr.l <= st.scarce);
   }
   const pctTxt = (x) => Math.round(Math.abs(x) * 100) + "%";
 
@@ -139,5 +147,5 @@
     if (!any) root.append(el("section", { class: "panel card" }, el("p", { text: "Nothing passes the screens at today's prices." })));
   }
 
-  window.KSBMarket = { planFor, autoPlan, trend7, crateStats, portfolioSeries, goodBuys, renderBuys, addDays };
+  window.KSBMarket = { planFor, autoPlan, trend7, crateStats, trash, portfolioSeries, goodBuys, renderBuys, addDays };
 })();

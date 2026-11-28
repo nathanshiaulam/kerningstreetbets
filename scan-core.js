@@ -168,7 +168,9 @@
         let unk = !boxed(r, c);
         for (const t of tips || []) if (q.x < t.left + 240 * s && q.x + q.w > t.left - 3 * s && q.y + q.h > t.top - 3 * s) unk = true;   // under a tooltip, or possibly so
         for (const b of bands) if (q.y < b.y2 && q.y + q.h > b.y1 && q.x < b.x2 && q.x + q.w > b.x1) unk = true;
-        if (unk) { row.push({ unk: true }); continue; }
+        // An unread slot still keeps its picture as it looked, and how many border points showed (0 to 20), so
+        // the page can show the player which slots are blocked.
+        if (unk) { const v = sides[r][c]; row.push({ unk: true, peek: sample(img, q.x, q.y, q.w, q.h, 32, 32), clear: v[0] + v[1] + v[2] + v[3] }); continue; }
         const raw = sample(img, q.x, q.y, q.w, q.h, N, N), empty = isEmptySlot(raw);
         row.push({ empty, badge: empty ? null : badgeOf(raw), fp: relBg(raw, SLOT_BG), thumb: empty ? null : sample(img, q.x, q.y, q.w, q.h, 32, 32) });
       }
@@ -378,7 +380,7 @@
       if (added) this.ver++;
       for (let r = 0; r < ROWS; r++) {
         if (off + r >= seg.rows.length) { seg.rows.push(blankRow()); added++; this.ver++; }
-        for (let c = 0; c < COLS; c++) if (!view[r][c].unk) this.put(seg.rows[off + r][c], view[r][c], r);
+        for (let c = 0; c < COLS; c++) { if (!view[r][c].unk) this.put(seg.rows[off + r][c], view[r][c], r); else this.peek(seg.rows[off + r][c], view[r][c]); }
       }
       seg.offset = off;
       const joined = this.segs.length > 1 ? this.join() : 0;
@@ -404,13 +406,20 @@
           if (off < 0) { a.rows = Array.from({ length: -off }, blankRow).concat(a.rows); a.offset -= off; off = 0; }
           for (let r = 0; r < b.rows.length; r++) {
             if (off + r >= a.rows.length) a.rows.push(blankRow());
-            for (let c = 0; c < COLS; c++) for (const alt of b.rows[r][c].alts) this.merge(a.rows[off + r][c], alt);
+            for (let c = 0; c < COLS; c++) { for (const alt of b.rows[r][c].alts) this.merge(a.rows[off + r][c], alt); const pk = b.rows[r][c].peek, to = a.rows[off + r][c]; if (pk && (!to.peek || pk.clear > to.peek.clear)) to.peek = pk; }
           }
           this.segs.splice(i, 1); if (i < this.at) this.at--;
           this.ver++; n++; again = true; break;
         }
       }
       return n;
+    }
+    // A slot that could not be read leaves its picture on a cell that has never been read. The view where
+    // most of the slot's border showed is kept, since that one shows the most of the item.
+    peek(cell, slot) {
+      if (cell.cur || !slot.peek) return;
+      if (!cell.peek) this.ver++; else if (slot.clear < cell.peek.clear) return;
+      cell.peek = { thumb: slot.peek, clear: slot.clear };
     }
     // A slot is seen at up to six screen positions as the list scrolls. The reading seen at the most
     // positions wins, so a pointer parked over one spot cannot overwrite what was there.
@@ -427,6 +436,12 @@
     // Rows that hold at least one item, and slots inside those rows that were never seen clearly.
     filled() { let t = 0; for (const seg of this.segs) { let n = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) n = i + 1; }); t += n; } return t; }
     unseen() { let n = 0; for (const seg of this.segs) { let f = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) f = i + 1; }); for (let i = 0; i < f; i++) for (const c of seg.rows[i]) if (!c.cur) n++; } return n; }
+    // The same slots unseen() counts, with where each is and the picture kept for it (null if none was).
+    blocked() {
+      const out = [];
+      this.segs.forEach((seg, si) => { let f = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) f = i + 1; }); for (let i = 0; i < f; i++) seg.rows[i].forEach((c, col) => { if (!c.cur) out.push({ seg: si, row: i, col, thumb: c.peek ? c.peek.thumb : null }); }); });
+      return out;
+    }
     // Group identical icons. Each group counts its unworn (red) and worn (purple) copies.
     groups() {
       const gs = []; let base = 0;

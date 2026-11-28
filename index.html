@@ -174,6 +174,13 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
 .scan-item .q{font-weight:700;font-variant-numeric:tabular-nums}
 .scan-item .sub{font-size:12px;color:var(--ink2);white-space:nowrap}
 .scan-note{padding:12px;color:var(--ink2);font-size:14px}
+.scan-blocked{border:2px solid var(--s4);border-radius:2px;padding:10px 12px;display:grid;gap:6px}
+.scan-blocked-h{font-weight:700}
+.scan-blocked-p{font-size:13px;color:var(--ink2);max-width:70ch}
+.scan-blocked-row{display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:2px}
+.scan-blocked-i{margin:0;display:grid;justify-items:center;gap:3px;font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.scan-blocked-i .ico{width:44px;height:44px}
+.scan-blocked-i .ico.none{display:grid;place-items:center;font-weight:700;color:#333}
 .check{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink2);cursor:pointer}
 .check input{accent-color:var(--mark)}
 .msg{font-size:13px;color:var(--ink2);min-height:1.2em}
@@ -266,6 +273,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
       </div>
       <div class="scan-right">
         <div class="scan-counts" id="scanCounts"></div>
+        <div class="scan-blocked" id="scanBlocked" hidden></div>
         <div class="scan-list" id="scanList"></div>
         <datalist id="scanLoose"></datalist>
         <div class="line">
@@ -635,7 +643,7 @@ $("#copyBtn").addEventListener("click", async () => {
 });
 
 /* ---------- update and reset ---------- */
-const BUILD = "2026-11-28 01:04 PT";
+const BUILD = "2026-11-28 01:25 PT";
 async function freshReload() {
   // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
   const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];

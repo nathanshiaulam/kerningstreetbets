@@ -84,7 +84,11 @@
     st.lastRows = rows;
     const ver = st.map.ver, r = st.map.add(rows, !!o.pages, firm);
     if (st.map.ver !== ver) st.dirty = true;                     // any slot that changed, not only new rows, refreshes the list
-    if (!r || r.skip) return true;
+    if (!r || r.skip) { st.hidNow = []; return true; }
+    // Slots in this view that are unreadable right now and have never been read: outlined on the preview.
+    { const now = [], seg = st.map.rows;
+      for (let i = 0; i < S.ROWS; i++) { const row = seg[r.offset + i]; if (!row || !row.some((x) => x.cur && !x.cur.empty)) continue; for (let c = 0; c < S.COLS; c++) if (rows[i][c].unk && !row[c].cur) now.push([i, c]); }
+      st.hidNow = now; }
     // Slots under the pop-up or pointer that have never been seen: once the list has rested a moment, say so,
     // with a sound, since the player is looking at the game and not at this page.
     if (firm && !o.pages) {
@@ -186,9 +190,21 @@
     if (list.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // don't redraw under the cursor
     st.dirty = false;
     const res = (st.res = results()), sellRows = res.rows.filter((r) => r.g.red > 0), named = sellRows.filter((r) => r.name).length;
+    const blk = st.map.rows.length ? st.map.blocked() : [];
     $("#scanCounts").textContent = st.map.rows.length
-      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.gaps ? " · gap in the scan: scroll back through the rows you skipped" : "") + (st.map.unseen() ? " · " + st.map.unseen() + " slots not seen clearly yet (move the pointer off them)" : "") + (st.pending ? " · naming " + st.pending + " more…" : "")
+      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.gaps ? " · gap in the scan: scroll back through the rows you skipped" : "") + (blk.length ? " · " + blk.length + (blk.length === 1 ? " slot" : " slots") + " not read yet (shown below)" : st.map.gaps ? "" : " · every slot in these rows read") + (st.pending ? " · naming " + st.pending + " more…" : "")
       : st.named.length ? st.named.length + " names read. Scroll through the inventory with no item hovered so the items can be counted." : "";
+    const box = $("#scanBlocked");
+    box.hidden = !blk.length; box.replaceChildren();
+    if (blk.length) {
+      box.append(el("div", { class: "scan-blocked-h", text: "Not read yet: " + blk.length + (blk.length === 1 ? " slot" : " slots") }),
+        el("div", { class: "scan-blocked-p", text: "Something was over " + (blk.length === 1 ? "this slot" : "these slots") + " every time " + (blk.length === 1 ? "it" : "they") + " came into view, so " + (blk.length === 1 ? "it is" : "they are") + " not in the list below. The pictures show what the scanner saw there. Scroll back to " + (blk.length === 1 ? "it" : "them") + " with the pointer off the items; " + (blk.length === 1 ? "it leaves" : "each one leaves") + " this box once it is read." }));
+      const strip = el("div", { class: "scan-blocked-row" });
+      for (const b of blk.slice(0, 40)) strip.append(el("figure", { class: "scan-blocked-i" }, b.thumb ? el("img", { class: "ico", src: thumbUrl(b.thumb), alt: "" }) : el("span", { class: "ico none", text: "?" }),
+        el("figcaption", { text: (st.map.gaps ? "" : "Row " + (b.row + 1) + ", ") + "slot " + (b.col + 1) })));
+      box.append(strip);
+      if (blk.length > 40) box.append(el("div", { class: "scan-blocked-p", text: "And " + (blk.length - 40) + " more." }));
+    }
     list.replaceChildren();
     const order = sellRows.slice().sort((a, b) => (a.name ? 1 : 0) - (b.name ? 1 : 0) || a.g.slots[0][0] - b.g.slots[0][0] || a.g.slots[0][1] - b.g.slots[0][1]);
     for (const r of order) {
@@ -238,6 +254,11 @@
     c.globalAlpha = 1; c.fillStyle = "#3a3a3a"; c.fillRect(0, 0, cv.width, cv.height);
     c.globalAlpha = 0.5; c.drawImage(fc, x1, y1, w, h, 0, 0, cv.width, cv.height); c.globalAlpha = 1;
     c.lineWidth = 2 * dpr;
+    if (st.grid && st.hidNow && st.hidNow.length) {
+      c.strokeStyle = "#ffb000"; c.setLineDash([4 * dpr, 3 * dpr]);
+      for (const [i, col] of st.hidNow) { const q = S.slotRect(st.grid, i, col); c.strokeRect((q.x - 1.5 * s - x1) * z, (q.y - 1.5 * s - y1) * z, (q.w + 3 * s) * z, (q.h + 3 * s) * z); }
+      c.setLineDash([]);
+    }
     st.lastTips.forEach((t, i) => { c.strokeStyle = i === 0 ? "#2fae68" : "rgba(160,160,160,.5)"; for (const r of t.names) c.strokeRect((r.x - x1) * z, (r.y - y1) * z, r.w * z, r.h * z); if (i === 0) c.strokeRect((t.box.x - x1) * z, (t.box.y - y1) * z, t.box.w * z, t.box.h * z); });
   }
 
@@ -305,7 +326,7 @@
     setButtons(); renderScan();
   }
   function reset() {
-    st.map = new S.InvMap(); st.named = []; st.manual = []; st.dbCache = []; st.hover = null; st.lastRows = null; st.lastSum = null; st.grid = null; st.sawOpenGrid = false; st.dirty = true;
+    st.map = new S.InvMap(); st.named = []; st.manual = []; st.dbCache = []; st.hover = null; st.lastRows = null; st.lastSum = null; st.grid = null; st.hidNow = []; st.sawOpenGrid = false; st.dirty = true;
     $("#scanMsg").textContent = ""; say(st.on ? "Scan cleared. Looking for your item inventory…" : "Scan cleared."); renderScan();
   }
   async function fromFiles(files) {
@@ -346,7 +367,7 @@
   $("#scanUndo").addEventListener("click", () => { if (!st.undo) return; pf.holdings = st.undo; st.undo = null; sel = null; changed(); $("#scanUndo").hidden = true; $("#scanMsg").textContent = "Put your portfolio back the way it was before the sync."; });
   $("#scanCopy").addEventListener("click", async () => {
     const res = st.res || results(), f1 = (x) => (x == null || !isFinite(x) ? null : +x.toFixed(1));
-    const text = JSON.stringify({ scale: f1(st.s * 100) / 100, frame: st.frame, grid: st.grid && [Math.round(st.grid.x0), Math.round(st.grid.y0)], rows: st.map.rows.length, stretches: st.map.segs.map((g) => g.rows.length), filled: st.map.filled(), kinds: res.rows.length, named: st.named.length,
+    const text = JSON.stringify({ scale: f1(st.s * 100) / 100, frame: st.frame, grid: st.grid && [Math.round(st.grid.x0), Math.round(st.grid.y0)], rows: st.map.rows.length, stretches: st.map.segs.map((g) => g.rows.length), blocked: st.map.blocked().map((b) => [b.seg, b.row, b.col]), filled: st.map.filled(), kinds: res.rows.length, named: st.named.length,
       unmatched: res.loose.map((n) => ({ name: n.name, d: n.m && f1(n.m.d), second: n.m && f1(n.m.second), shift: n.m && [n.m.dx, n.m.dy], nearest: n.m && res.rows[n.m.i] ? res.rows[n.m.i].g.slots[0] : null })) });
     try { await navigator.clipboard.writeText(text); $("#scanMsg").textContent = "Copied the scan details. Paste them into your Claude chat."; } catch (e) { $("#scanMsg").textContent = text; }
   });

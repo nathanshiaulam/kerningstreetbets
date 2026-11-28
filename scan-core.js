@@ -131,7 +131,8 @@
   // Read the 30 visible slots. A slot under a tooltip, or under the pointer that sits just above the
   // hovered tooltip's corner, is marked unknown (unk) so it is never mistaken for an item.
   // `lenient` (single screenshots, where each slot is seen only once) accepts a slot with two whole sides.
-  function readSlots(img, grid, tips, lenient) {
+  // `wide` is the short list from wideIcons(); without it every upright line must be whole.
+  function readSlots(img, grid, tips, lenient, wide) {
     const rows = [], s = grid.s, W = img.width, H = img.height, d = img.data;
     // A slot is boxed in by white lines. If any side's line is hidden for more than a sliver, something
     // (a tooltip, the pointer) is over the slot and its picture can't be trusted. The line is looked for
@@ -139,18 +140,32 @@
     const lit = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= W || y >= H) return false; const k = (y * W + x) * 4; return d[k] >= 232 && d[k + 1] >= 232 && d[k + 2] >= 232; };
     const OFFS = [0, -0.5, 0.5, -1, 1], ALONG = [0.12, 0.31, 0.5, 0.69, 0.88];
     const side = (q, horiz, at) => { let n = 0; for (const t of ALONG) for (const o of OFFS) if (horiz ? lit(q.x + q.w * t, at + o * s) : lit(at + o * s, q.y + q.h * t)) { n++; break; } return n; };
-    // The lines at a slot's left and right are never crossed by an icon, so they must be nearly whole. A tall
-    // icon can poke over the line above it and hide up to three of the five points there.
-    const boxed = (q) => {
-      const a = side(q, false, q.x - 2.3 * s), b = side(q, false, q.x + q.w + 1.7 * s), c = side(q, true, q.y - 2.9 * s), e = side(q, true, q.y + q.h - 0.9 * s);
-      return lenient ? (a >= 4) + (b >= 4) + (c >= 4) + (e >= 4) >= 2 : a >= 4 && b >= 4 && c >= 2 && e >= 2;
+    // Read all four lines of every slot first: [left, right, above, below], each 0 to 5 points found.
+    const sides = [];
+    for (let r = 0; r < ROWS; r++) { sides.push([]); for (let c = 0; c < COLS; c++) { const q = slotRect(grid, r, c); sides[r].push([side(q, false, q.x - 2.3 * s), side(q, false, q.x + q.w + 1.7 * s), side(q, true, q.y - 2.9 * s), side(q, true, q.y + q.h - 0.9 * s)]); } }
+    // A tall icon can poke over the line above it and hide up to three of the five points there, so the
+    // lines above and below need only two. An upright line must be nearly whole, with one exception: the
+    // few icons wider than the slot and its margins (Tania Sword is 39 px across) cover the line beside
+    // them. That line is excused only when the slot on one side of it shows one of those icons, cleanly
+    // enough to match the dictionary, so a pointer or a tooltip resting on a line still hides the slot.
+    const seenWide = {};
+    const holdsWide = (r, c) => {
+      if (c < 0 || c >= COLS || !wide || !wide.length) return false;
+      const k = r * COLS + c;
+      if (!(k in seenWide)) { const q = slotRect(grid, r, c), m = matchIcon(sample(img, q.x, q.y, q.w, q.h, 32, 32), wide); seenWide[k] = !!m && m.d <= 26; }
+      return seenWide[k];
+    };
+    const upright = (r, c, right) => sides[r][c][right ? 1 : 0] >= 4 || holdsWide(r, c) || holdsWide(r, right ? c + 1 : c - 1);
+    const boxed = (r, c) => {
+      const v = sides[r][c];
+      return lenient ? (v[0] >= 4) + (v[1] >= 4) + (v[2] >= 4) + (v[3] >= 4) >= 2 : v[2] >= 2 && v[3] >= 2 && upright(r, c, false) && upright(r, c, true);
     };
     const bands = (tips || []).map((t) => ({ y1: t.top - 31 * s, y2: t.top + 1 * s, x1: tips.length > 1 ? -1e9 : t.left - 16 * s, x2: tips.length > 1 ? 1e9 : t.left + 32 * s }));
     for (let r = 0; r < ROWS; r++) {
       const row = [];
       for (let c = 0; c < COLS; c++) {
         const q = slotRect(grid, r, c);
-        let unk = !boxed(q);
+        let unk = !boxed(r, c);
         for (const t of tips || []) if (q.x < t.left + 240 * s && q.x + q.w > t.left - 3 * s && q.y + q.h > t.top - 3 * s) unk = true;   // under a tooltip, or possibly so
         for (const b of bands) if (q.y < b.y2 && q.y + q.h > b.y1 && q.x < b.x2 && q.x + q.w > b.x1) unk = true;
         if (unk) { row.push({ unk: true }); continue; }
@@ -478,6 +493,9 @@
     }
     return out;
   }
+  // The icons wide enough to cover the line between two slots. readSlots uses them to tell such an icon from
+  // a pointer or tooltip lying over the line.
+  function wideIcons(sigs) { return (sigs || []).filter((g) => g.w >= 38); }
   function iconAt(th, sg, ox, oy, lim) {
     let tot = 0, wt = 0; const cap = lim * sg.wt;       // once the running total passes this, the result cannot beat `lim`
     for (let j = 0; j < sg.ch; j++) { if (tot > cap) return 1e9; for (let i = 0; i < sg.cw; i++) {
@@ -520,5 +538,5 @@
     return read;
   }
 
-  return { COLS, ROWS, N, SAME, sample, findGrid, slotRect, gridRect, readSlots, thumbFp, dist, badgeOf, findTips, tipCrop, tipFp, tipDist, nameImage, InvMap, sameView, matchTip, prepIcons, matchIcon, cleanName, snapName, lev };
+  return { COLS, ROWS, N, SAME, sample, findGrid, slotRect, gridRect, readSlots, thumbFp, dist, badgeOf, findTips, tipCrop, tipFp, tipDist, nameImage, InvMap, sameView, matchTip, prepIcons, wideIcons, matchIcon, cleanName, snapName, lev };
 });

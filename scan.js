@@ -79,7 +79,7 @@
     let g = grid;
     if (grid && grid.covered && st.grid && Math.abs(grid.x0 + ox - st.grid.x0) <= 2 && Math.abs(grid.y0 + oy - st.grid.y0) <= 2) g = { x0: st.grid.x0 - ox, y0: st.grid.y0 - oy, s: st.grid.s };
     if (!g) return false;
-    const rows = S.readSlots(img, g, tips, !!o.pages);
+    const rows = S.readSlots(img, g, tips, !!o.pages, st.wide || (st.sigs && st.sigs.length ? (st.wide = S.wideIcons(st.sigs)) : null));
     const firm = !!o.force || S.sameView(rows, st.lastRows);     // seen twice running: the list has stopped moving
     st.lastRows = rows;
     const ver = st.map.ver, r = st.map.add(rows, !!o.pages, firm);

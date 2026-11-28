@@ -128,6 +128,18 @@ button,input,select{font:inherit;color:inherit}
 .kv div{display:flex;flex-direction:column;border-top:1px solid var(--line);padding-top:6px}
 .kv span{font-size:12px;color:var(--ink2)} .kv b{font-variant-numeric:tabular-nums;font-weight:700}
 .why{background:var(--wash);border-left:6px solid var(--mark);padding:10px 12px;font-size:14px}
+.ask{display:grid;gap:10px;border-top:2px solid var(--edge);padding-top:14px}
+.ask .ask-h{margin:0;font-family:var(--display);font-size:22px;line-height:1.1;font-weight:800;letter-spacing:.01em}
+.ask-presets .btn{font-size:13px;padding:4px 10px}
+.ask-rec{margin:0;font-size:14px;max-width:62ch}
+.ask-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.ask-price{font-size:28px;font-variant-numeric:tabular-nums;line-height:1}
+.ask-rel{font-size:13px;color:var(--ink2)}
+.ask input[type=range]{width:100%;accent-color:var(--mark);margin:0;height:28px}
+.ask-presets{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ask-pl{font-size:13px;color:var(--ink2);flex-basis:100%}
+.ask-kv .wide{grid-column:1 / -1}
+.ask-note{margin:0;font-size:12px;color:var(--ink2);max-width:70ch}
 .why b{display:block;margin-bottom:2px}
 .acts{display:flex;flex-direction:column;gap:12px;border-top:2px solid var(--edge);padding-top:14px}
 .line{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -592,6 +604,7 @@ function renderDetail(v) {
   add("Price source", v.p == null ? null : v.mine ? "Your in-game price" : v.pr && v.pr.t ? "Cozy Market, " + timeStr(v.pr.t) : "Tracker sale median");
   if (c) { add("Supply ends", c.e ? shortDate(c.e) : null); add("Buy at or below", c.buy ? full(c.buy) : null); add("Sell at or above", c.sell ? full(c.sell) : null); add("Review by", c.reviewBy ? shortDate(c.reviewBy) + " · floor " + kfmt(c.floor) : null); }
   d.append(kv);
+  const ask = h.slug && v.p != null ? askBlock(v) : null; if (ask) d.append(ask);
 
   const acts = el("div", { class: "acts" });
   const soldIn = el("input", { class: "in sm", id: "soldPrice", inputmode: "numeric", value: v.p != null ? String(Math.round(v.p)) : "", "aria-label": "Sale price" });
@@ -611,6 +624,39 @@ function renderDetail(v) {
   acts.append(el("div", { class: "line" }, el("label", { for: "rename", text: "Name" }), nameIn, el("button", { class: "btn", text: h.ok === false ? "Confirm name" : "Rename", onclick: setName })));
   acts.append(el("div", { class: "line" }, el("label", { for: "qty", text: "Quantity" }), qtyIn, el("button", { class: "btn ghost", text: "Remove item", onclick: () => { pf.holdings = pf.holdings.filter((x) => x.id !== h.id); changed(); } })));
   d.append(acts);
+}
+// Asking price: a slider from 15% under today's price to 30% over, with what the sale records say about
+// each price. The numbers come from KSBMarket.sellModel and are estimates.
+const nice = (x) => { if (!(x > 0)) return 0; const m = x < 100000 ? 500 : x < 1e6 ? 1000 : 10000; return Math.round(x / m) * m; };   // prices the way shops write them
+const waitStr = (d) => d < 1 / 24 ? "under an hour" : d < 0.75 ? "about " + Math.max(1, Math.round(d * 24)) + (Math.round(d * 24) <= 1 ? " hour" : " hours") : d < 1.5 ? "about a day" : d < 60 ? "about " + Math.round(d) + " days" : "over two months";
+const chanceStr = (x) => x >= 0.995 ? "99%+" : x < 0.01 ? "under 1%" : Math.round(x * 100) + "%";
+function askBlock(v) {
+  const m = KSBMarket.sellModel(v.pr, v.p); if (!m) return null;
+  const falling = v.sig.key === "sell" || (v.day != null && v.day <= -0.03) || KSBMarket.trend7(v.pr, todayStr()) <= -0.1;
+  const quick = nice(m.priceFor(1)), mid = nice(m.priceFor(3)), patient = nice(m.priceFor(7)), rec = falling ? quick : mid;
+  const box = el("section", { class: "ask", "aria-label": "Asking price" });
+  const out = el("b", { class: "ask-price" }), rel = el("span", { class: "ask-rel" });
+  const range = el("input", { type: "range", id: "askRange", min: "-15", max: "30", step: "0.5", "aria-label": "Asking price, as a change from today's price" });
+  const sShare = el("b"), sWait = el("b"), sChance = el("b");
+  const set = (price) => { range.value = String(Math.max(-15, Math.min(30, (price / m.p0 - 1) * 100))); draw(price); };
+  function draw(exact) {
+    const x = exact || nice(m.p0 * (1 + parseFloat(range.value) / 100)), s = m.share(x), w = m.wait(x), per = m.perDay * s;
+    out.textContent = full(x); rel.textContent = Math.abs(x / m.p0 - 1) < 0.0025 ? "today's price" : pct(x / m.p0 - 1) + " against today's " + full(m.p0);
+    range.setAttribute("aria-valuetext", full(x) + " mesos");
+    sShare.textContent = chanceStr(s) + " of recent sales" + (m.perDay ? ", " + (per >= 10 ? "about " + Math.round(per) + " a day" : per >= 0.1 ? "about " + per.toFixed(1) + " a day" : "fewer than one every ten days") : "");
+    sWait.textContent = (w >= 60 ? "over two months: unlikely to sell here" : waitStr(w).replace(/^about /, "about "));
+    sChance.textContent = "1 day " + chanceStr(m.chance(x, 1)) + " · 3 days " + chanceStr(m.chance(x, 3)) + " · 7 days " + chanceStr(m.chance(x, 7));
+  }
+  range.addEventListener("input", () => draw());
+  const preset = (label, price) => el("button", { class: "btn", type: "button", text: label + " " + kfmt(price), onclick: () => set(price) });
+  box.append(el("h3", { class: "ask-h", text: "Asking price" }),
+    el("p", { class: "ask-rec", text: "Suggested: " + full(rec) + ". " + (falling ? "The price is falling, so this is the highest price with an even chance of selling within a day." : "This is the highest price with an even chance of selling within 3 days.") }),
+    el("div", { class: "ask-head" }, out, rel), range,
+    el("div", { class: "ask-presets" }, el("span", { class: "ask-pl", text: "Even chance of selling" }), preset("In a day:", quick), preset("In 3 days:", mid), preset("In a week:", patient), preset("Today's price:", nice(m.p0))),
+    el("div", { class: "kv ask-kv" }, el("div", null, el("span", { text: "Sales at this price or higher" }), sShare), el("div", null, el("span", { text: "Half sell within" }), sWait), el("div", { class: "wide" }, el("span", { text: "Chance it has sold after" }), sChance)),
+    el("p", { class: "ask-note", text: "An estimate for one copy, not a promise. Cozy has seen " + full(m.listed) + " listings of this and " + full(m.sold) + " sales, so about " + (m.rate < 0.1 ? (m.rate * 100).toFixed(1) : Math.round(m.rate * 100)) + "% of listings sell: most shops ask more than buyers pay. A listing at the top of the usual sale range (" + kfmt(m.hi) + ") is given that chance per day, and a lower or higher price moves it the way recent sale prices are spread" + (m.perDay ? " (tracker: about " + (m.perDay >= 10 ? Math.round(m.perDay) : m.perDay) + " sales a day, middle half " + kfmt(m.lo) + " to " + kfmt(m.hi) + ")" : "") + ". Read the wait as rough." + (falling ? " A falling price also leaves a fixed ask behind, which makes real waits longer." : "") }));
+  set(rec);
+  return box;
 }
 function renderSold() {
   const s = $("#sold"); s.replaceChildren();
@@ -648,7 +694,7 @@ $("#copyBtn").addEventListener("click", async () => {
 });
 
 /* ---------- update and reset ---------- */
-const BUILD = "2026-11-28 01:25 PT";
+const BUILD = "2026-11-28 02:05 PT";
 async function freshReload() {
   // Re-download every file past the browser's cache, then reload: the same result as a hard refresh.
   const files = ["./", "index.html", "scan.js", "scan-core.js", "market.js", "data/prices.json", "data/catalog.json", "data/icons.json"];

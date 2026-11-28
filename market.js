@@ -166,5 +166,34 @@
     if (!any) root.append(el("section", { class: "panel card" }, el("p", { text: "Nothing passes the screens at today's prices." })));
   }
 
-  window.KSBMarket = { planFor, autoPlan, trend7, crateStats, trash, portfolioSeries, goodBuys, renderBuys, addDays };
+  /* ---------- asking price: how long a listing is likely to wait ---------- */
+  // An estimate, centred on today's price `p0`, from two records:
+  //   share(x)   share of recent sales that went at x or higher. The middle half of sale prices (the
+  //              tracker's `q`, around its sale median `sp`) fixes how fast that share falls as x rises; the
+  //              tails follow a log-logistic curve. A band tighter than 4% each way is widened to 4%, because
+  //              prices that bunch on a round number make the saved band look narrower than sales are.
+  //   sellRate   share of the listings Cozy has seen that ended in a sale (`sd` / `l`). Most shops ask more
+  //              than buyers pay, so this is usually low.
+  //   daily(x)   chance a listing at x sells in a day. The typical shop is taken to ask at the top of the
+  //              middle half of sale prices and to sell at sellRate a day; the odds then move with x exactly
+  //              as the odds of a sale being at x or higher do. It cannot beat the pace of sales (`v`).
+  //   wait(x), chance(x, days)   the days by which half of such listings have sold, and the chance it has sold by then.
+  // The weak points are the assumed asking price of the typical shop and treating a listing Cozy saw as
+  // one day on sale, so the wait is rough; the direction and steepness come from the sale records.
+  function sellModel(pr, p0) {
+    if (!pr || !(p0 > 0) || !pr.q || !(pr.q[0] > 0) || !(pr.q[1] > 0) || !(pr.l >= 100) || !(pr.sd >= 5) || pr.sd >= pr.l) return null;
+    const sp = pr.sp > 0 ? pr.sp : p0, MIN = Math.log(1.04), L3 = Math.log(3), rate = pr.sd / pr.l, base = rate / (1 - rate);
+    const up = Math.max(MIN, Math.log(Math.max(pr.q[1], sp) / sp)), dn = Math.max(MIN, Math.log(sp / Math.min(pr.q[0], sp)));
+    const tilt = (x) => { const d = Math.log(x / p0); return Math.exp(L3 * d / (d >= 0 ? up : dn)); };   // odds against a sale being at x or higher
+    const share = (x) => 1 / (1 + tilt(x));
+    const cap = pr.v > 0 ? 1 - Math.exp(-pr.v) : 0.98;
+    const daily = (x) => { const odds = 3 * base / tilt(x); return Math.min(cap, odds / (1 + odds)); };
+    const wait = (x) => -Math.LN2 / Math.log(1 - daily(x));        // days by which half of such listings have sold
+    const chance = (x, days) => 1 - Math.pow(1 - daily(x), days);
+    // the highest price that still has an even chance of selling within `days`
+    const priceFor = (days) => { let lo = p0 * 0.4, hi = p0 * 2.5; for (let i = 0; i < 44; i++) { const mid = Math.sqrt(lo * hi); if (chance(mid, days) >= 0.5) lo = mid; else hi = mid; } return lo; };
+    return { p0, perDay: pr.v || 0, listed: pr.l, sold: pr.sd, rate, lo: p0 * Math.exp(-dn), hi: p0 * Math.exp(up), share, daily, wait, chance, priceFor };
+  }
+
+  window.KSBMarket = { planFor, autoPlan, trend7, crateStats, trash, portfolioSeries, goodBuys, renderBuys, addDays, sellModel };
 })();

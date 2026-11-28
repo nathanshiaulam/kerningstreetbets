@@ -1,24 +1,28 @@
-# Saves one copy of the tracker's full market file as a run artifact (kept one day), for one-off
-# research into items the site does not track. Nothing is committed to the repo.
+# Saves one copy of the tracker's full market file to the side branch "research-snapshot", for one-off
+# research into items the site does not track. Nothing is committed to main and the site is not touched.
 name: Tracker snapshot
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/snapshot.yml"
 permissions:
-  contents: read
+  contents: write
 jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
       - name: Fetch the market file
         run: |
+          mkdir snap && cd snap
           curl -sS -f -m 60 -A "kerningstreetbets price refresh (+https://github.com/nathanshiaulam/kerningstreetbets)" -o market.json https://maplestory-classic.com/market.json
           ls -la market.json
-      - name: Keep it for a day
-        uses: actions/upload-artifact@v4
-        with:
-          name: market
-          path: market.json
-          retention-days: 1
+      - name: Push it to the side branch
+        run: |
+          cd snap
+          git init -q -b research-snapshot
+          git config user.name "tracker-snapshot"
+          git config user.email "actions@users.noreply.github.com"
+          git add market.json && git commit -q -m "Tracker snapshot"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" research-snapshot

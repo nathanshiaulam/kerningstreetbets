@@ -1,0 +1,24 @@
+# Saves one copy of the tracker's full market file as a run artifact (kept one day), for one-off
+# research into items the site does not track. Nothing is committed to the repo.
+name: Tracker snapshot
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/snapshot.yml"
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the market file
+        run: |
+          curl -sS -f -m 60 -A "kerningstreetbets price refresh (+https://github.com/nathanshiaulam/kerningstreetbets)" -o market.json https://maplestory-classic.com/market.json
+          ls -la market.json
+      - name: Keep it for a day
+        uses: actions/upload-artifact@v4
+        with:
+          name: market
+          path: market.json
+          retention-days: 1

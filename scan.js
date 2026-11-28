@@ -192,13 +192,13 @@
     const res = (st.res = results()), sellRows = res.rows.filter((r) => r.g.red > 0), named = sellRows.filter((r) => r.name).length;
     const blk = st.map.rows.length ? st.map.blocked() : [];
     $("#scanCounts").textContent = st.map.rows.length
-      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.gaps ? " · gap in the scan: scroll back through the rows you skipped" : "") + (blk.length ? " · " + blk.length + (blk.length === 1 ? " slot" : " slots") + " not read yet (shown below)" : st.map.gaps ? "" : " · every slot in these rows read") + (st.pending ? " · naming " + st.pending + " more…" : "")
+      ? st.map.filled() + " rows mapped · " + res.red + " sellable items in " + sellRows.length + " kinds · " + named + " of " + sellRows.length + " named" + (res.purple ? " · " + res.purple + " worn left out" : "") + (st.map.gaps ? " · gap in the scan, so these counts may be off: scroll back through the rows you skipped" : "") + (blk.length ? " · " + blk.length + (blk.length === 1 ? " slot" : " slots") + " not read yet (shown below)" : st.map.gaps ? "" : " · every slot in these rows read") + (st.pending ? " · naming " + st.pending + " more…" : "")
       : st.named.length ? st.named.length + " names read. Scroll through the inventory with no item hovered so the items can be counted." : "";
     const box = $("#scanBlocked");
     box.hidden = !blk.length; box.replaceChildren();
     if (blk.length) {
       box.append(el("div", { class: "scan-blocked-h", text: "Not read yet: " + blk.length + (blk.length === 1 ? " slot" : " slots") }),
-        el("div", { class: "scan-blocked-p", text: "Something was over " + (blk.length === 1 ? "this slot" : "these slots") + " every time " + (blk.length === 1 ? "it" : "they") + " came into view, so " + (blk.length === 1 ? "it is" : "they are") + " not in the list below. The pictures show what the scanner saw there. Scroll back to " + (blk.length === 1 ? "it" : "them") + " with the pointer off the items; " + (blk.length === 1 ? "it leaves" : "each one leaves") + " this box once it is read." }));
+        el("div", { class: "scan-blocked-p", text: (blk.length === 1 ? "This slot is" : "These slots are") + " not in the list below. Either something was over " + (blk.length === 1 ? "it" : "them") + " every time " + (blk.length === 1 ? "it" : "they") + " came into view, or " + (blk.length === 1 ? "it" : "they") + " went past too fast to be sure of. The pictures show what the scanner saw. Scroll back over " + (blk.length === 1 ? "it" : "them") + " slowly with the pointer off the items; " + (blk.length === 1 ? "it leaves" : "each one leaves") + " this box once it is read." }));
       const strip = el("div", { class: "scan-blocked-row" });
       for (const b of blk.slice(0, 40)) strip.append(el("figure", { class: "scan-blocked-i" }, b.thumb ? el("img", { class: "ico", src: thumbUrl(b.thumb), alt: "" }) : el("span", { class: "ico none", text: "?" }),
         el("figcaption", { text: (st.map.gaps ? "" : "Row " + (b.row + 1) + ", ") + "slot " + (b.col + 1) })));
@@ -298,14 +298,14 @@
             handle(f, w, h).catch((e) => console.error(e)).finally(() => { f.close(); st.busy = false; });
             continue;
           }
-          try { if (now - (st.lastFast || 0) >= 40) { st.lastFast = now; fast(f, w, h); if (st.dirty && !st.busy) renderScan(); } } catch (e) { console.error(e); }
+          try { if (now - (st.lastFast || 0) >= 20) { st.lastFast = now; fast(f, w, h); if (st.dirty && !st.busy) renderScan(); } } catch (e) { console.error(e); }
           f.close();
         }
         try { rd.cancel(); } catch (e) {}
       })();
     } else {
       const v = (st.video = document.createElement("video")); v.muted = true; v.srcObject = stream; await v.play();
-      const tick = new Worker(URL.createObjectURL(new Blob(["setInterval(()=>postMessage(0),45)"], { type: "text/javascript" })));
+      const tick = new Worker(URL.createObjectURL(new Blob(["setInterval(()=>postMessage(0),33)"], { type: "text/javascript" })));
       st.timer = tick;
       tick.onmessage = () => {
         if (!st.on || !v.videoWidth) return;
@@ -361,7 +361,7 @@
   $("#scanFiles").addEventListener("change", (e) => { const f = e.target.files; fromFiles(f).finally(() => { e.target.value = ""; }); });
   $("#scanApply").addEventListener("click", () => {
     const b = $("#scanApply");
-    if (Date.now() - st.armed > 5000) { st.armed = Date.now(); const rs = (st.res || results()).rows.filter((r) => r.g.red > 0 && !r.redUntradable), un = rs.filter((r) => !r.name).length; b.textContent = (st.map.gaps ? "There's a gap in the scan, so items may be missing or counted twice. " : "") + (un ? un + " kinds have no name yet and will show as Unnamed. " : "") + "Replace " + pf.holdings.length + " portfolio rows with " + rs.length + " scanned? Click again"; setTimeout(() => { if (st.armed && Date.now() - st.armed >= 5000) { b.textContent = "Sync portfolio to this scan"; st.armed = 0; } }, 5100); return; }
+    if (Date.now() - st.armed > 5000) { st.armed = Date.now(); const rs = (st.res || results()).rows.filter((r) => r.g.red > 0 && !r.redUntradable), un = rs.filter((r) => !r.name).length; b.textContent = (st.map.gaps ? "There's a gap in the scan, so items may be missing or counted twice. " : "") + (st.map.unseen() ? st.map.unseen() + " slots were not read and are left out. " : "") + (un ? un + " kinds have no name yet and will show as Unnamed. " : "") + "Replace " + pf.holdings.length + " portfolio rows with " + rs.length + " scanned? Click again"; setTimeout(() => { if (st.armed && Date.now() - st.armed >= 5000) { b.textContent = "Sync portfolio to this scan"; st.armed = 0; } }, 5100); return; }
     st.armed = 0; b.textContent = "Sync portfolio to this scan"; applyScan();
   });
   $("#scanUndo").addEventListener("click", () => { if (!st.undo) return; pf.holdings = st.undo; st.undo = null; sel = null; changed(); $("#scanUndo").hidden = true; $("#scanMsg").textContent = "Put your portfolio back the way it was before the sync."; });

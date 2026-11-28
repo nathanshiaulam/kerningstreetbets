@@ -319,21 +319,27 @@
   const bits = (m) => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
   // How well a run of rows lines up with mapped rows at a given offset. `get(r)` returns a row of slots or null.
   function lineUp(rows, get, len, off) {
-    let same = 0, emp = 0, diff = 0;
+    let same = 0, emp = 0, diff = 0, weak = 0;
     for (let r = 0; r < len; r++) {
       const m = rows[off + r], v = get(r); if (!m || !v) continue;
       for (let c = 0; c < COLS; c++) {
-        const a = m[c].cur, x = v[c]; if (!a || !x || x.unk) continue;
-        if (a.empty && x.empty) emp++; else if (slotSame(a, x)) same++; else diff++;
+        const x = v[c]; if (!x || x.unk) continue;
+        const a = m[c].cur, t = a ? null : m[c].once;
+        if (a) { if (a.empty && x.empty) emp++; else if (slotSame(a, x)) same++; else diff++; }
+        else if (t && !t.empty && !x.empty && slotSame(t, x)) weak++;     // seen once only: a hint, never proof
       }
     }
-    return { same, emp, diff };
+    return { same, emp, diff, weak };
   }
   // Matching items are strong evidence and matching empty slots weak evidence. A few slots may disagree
   // (the pointer over one, a half-covered edge), but only a small share of what was compared.
   const EMPTY_W = 0.34, NEED = 3;
   const fits = (k) => k.same + k.emp * EMPTY_W >= NEED && k.diff <= 1 + Math.floor((k.same + k.emp + k.diff) * 0.12);
-  const blankRow = () => Array.from({ length: COLS }, () => ({ cur: null, alts: [] }));
+  // A cell's `cur` is a reading that can be trusted: seen in a view that held still, or seen at two screen
+  // positions as the list moved. `once` is a reading seen in passing. Views are placed by trusted readings
+  // only, so one bad frame (caught half-way through a redraw) can neither add an item nor shift the map. The
+  // price is speed: scrolled faster than about two rows per frame, the map loses its place and says so.
+  const blankRow = () => Array.from({ length: COLS }, () => ({ cur: null, once: null, alts: [] }));
   class InvMap {
     // The inventory is kept as one or more stretches of rows. Normally there is one. When the list jumps
     // further than a view can be matched (fast scrolling), the new place starts its own stretch, and
@@ -345,11 +351,15 @@
     get gaps() { return this.segs.length - 1; }
     find(seg, view) {
       let best = null;
+      const boot = !seg.rows.some((row) => row.some((c) => c.cur));   // nothing trusted yet: readings seen once have to do
       for (let off = -(ROWS - 1); off <= seg.rows.length - 1; off++) {
         const k = lineUp(seg.rows, (r) => view[r], ROWS, off);
-        if (!fits(k)) continue;
-        if (!k.same && !(this.blank && Math.abs(off - seg.offset) <= ROWS)) continue;   // empty slots alone only count when the list was just seen scrolling through empty rows
-        const score = k.same + k.emp * EMPTY_W - 2.5 * k.diff - Math.abs(off - seg.offset) * 0.01;
+        // Where the list was last seen, readings seen once count too: that is a view holding still, which
+        // is how the first rows of a scan become trusted.
+        const kk = off === seg.offset || boot ? { same: k.same + k.weak, emp: k.emp, diff: k.diff, weak: 0 } : k;
+        if (!fits(kk)) continue;
+        if (!kk.same && !(this.blank && Math.abs(off - seg.offset) <= ROWS)) continue;   // empty slots alone only count when the list was just seen scrolling through empty rows
+        const score = k.same + k.emp * EMPTY_W + k.weak * 0.2 - 2.5 * k.diff - Math.abs(off - seg.offset) * 0.01;
         if (!best || score > best.score) best = { off, score };
       }
       return best;
@@ -380,7 +390,7 @@
       if (added) this.ver++;
       for (let r = 0; r < ROWS; r++) {
         if (off + r >= seg.rows.length) { seg.rows.push(blankRow()); added++; this.ver++; }
-        for (let c = 0; c < COLS; c++) { if (!view[r][c].unk) this.put(seg.rows[off + r][c], view[r][c], r); else this.peek(seg.rows[off + r][c], view[r][c]); }
+        for (let c = 0; c < COLS; c++) { if (!view[r][c].unk) this.put(seg.rows[off + r][c], view[r][c], r, !!(firm || pages)); else this.peek(seg.rows[off + r][c], view[r][c]); }
       }
       seg.offset = off;
       const joined = this.segs.length > 1 ? this.join() : 0;
@@ -423,23 +433,28 @@
     }
     // A slot is seen at up to six screen positions as the list scrolls. The reading seen at the most
     // positions wins, so a pointer parked over one spot cannot overwrite what was there.
-    put(cell, slot, r) { this.merge(cell, { slot, mask: 1 << r, t: this.tick, n: 1 }); }
+    put(cell, slot, r, sure) { this.merge(cell, { slot, mask: 1 << r, t: this.tick, n: 1, sure: !!sure }); }
     merge(cell, alt) {
       let v = cell.alts.find((a) => slotSame(a.slot, alt.slot));
-      if (v) { v.mask |= alt.mask; v.n += alt.n; if (alt.t >= v.t) { v.t = alt.t; v.slot = alt.slot; } } else cell.alts.push((v = { slot: alt.slot, mask: alt.mask, t: alt.t, n: alt.n }));
-      let top = cell.alts[0];
+      if (v) { v.mask |= alt.mask; v.n += alt.n; v.sure = v.sure || !!alt.sure; if (alt.t >= v.t) { v.t = alt.t; v.slot = alt.slot; } } else cell.alts.push((v = { slot: alt.slot, mask: alt.mask, t: alt.t, n: alt.n, sure: !!alt.sure }));
       const better = (a, b) => bits(a.mask) !== bits(b.mask) ? bits(a.mask) > bits(b.mask) : a.n !== b.n ? a.n > b.n : a.t > b.t;   // more positions, then more sightings, then newer
-      for (const a of cell.alts) if (better(a, top)) top = a;
-      if (!cell.cur || !slotSame(cell.cur, top.slot)) this.ver++;
-      cell.cur = top.slot;
+      let top = null, loose = null;
+      for (const a of cell.alts) { if (a.sure || bits(a.mask) >= 2 || a.n >= 4) { if (!top || better(a, top)) top = a; } else if (!loose || better(a, loose)) loose = a; }
+      const cur = top ? top.slot : null, once = top ? null : loose ? loose.slot : null;
+      if (!!cur !== !!cell.cur || (cur && !slotSame(cell.cur, cur)) || !!once !== !!cell.once) this.ver++;
+      cell.cur = cur; cell.once = once;
     }
     // Rows that hold at least one item, and slots inside those rows that were never seen clearly.
-    filled() { let t = 0; for (const seg of this.segs) { let n = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) n = i + 1; }); t += n; } return t; }
-    unseen() { let n = 0; for (const seg of this.segs) { let f = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) f = i + 1; }); for (let i = 0; i < f; i++) for (const c of seg.rows[i]) if (!c.cur) n++; } return n; }
-    // The same slots unseen() counts, with where each is and the picture kept for it (null if none was).
+    filled() { let t = 0; for (const seg of this.segs) { let a = -1, b = -1; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) { if (a < 0) a = i; b = i; } }); if (a >= 0) t += b - a + 1; } return t; }
+    unseen() { return this.blocked().length; }
+    // Slots with no trusted reading, between the first and last rows that hold one: where each is, why
+    // ("covered" by a pop-up or the pointer, or seen "once" in passing), and the picture kept for it.
     blocked() {
       const out = [];
-      this.segs.forEach((seg, si) => { let f = 0; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) f = i + 1; }); for (let i = 0; i < f; i++) seg.rows[i].forEach((c, col) => { if (!c.cur) out.push({ seg: si, row: i, col, thumb: c.peek ? c.peek.thumb : null }); }); });
+      this.segs.forEach((seg, si) => {
+        let a = -1, b = -1; seg.rows.forEach((row, i) => { if (row.some((c) => c.cur && !c.cur.empty)) { if (a < 0) a = i; b = i; } });
+        for (let i = a; i >= 0 && i <= b; i++) seg.rows[i].forEach((c, col) => { if (!c.cur) out.push({ seg: si, row: i, col, why: c.once ? "once" : "covered", thumb: c.once && c.once.thumb ? c.once.thumb : c.peek ? c.peek.thumb : null }); });
+      });
       return out;
     }
     // Group identical icons. Each group counts its unworn (red) and worn (purple) copies.

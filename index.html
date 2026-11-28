@@ -262,7 +262,7 @@ details.tbl td{padding:3px 0;border-top:1px solid var(--line)} details.tbl td:la
       <div class="scan-left">
         <canvas id="scanPreview" width="10" height="10" aria-label="What the scanner sees"></canvas>
         <ol class="scan-steps">
-          <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row at your normal speed. The item pop-up hides whatever is under it, so rest the pointer on the bottom-right slot, or anywhere in the window that isn't an item. A soft tick means new rows were added. A double beep means the pop-up is hiding slots: slide the pointer aside for a second. A low beep means you got ahead of it, and it will ask you to scroll back.</li>
+          <li><b>Scroll.</b> Open the inventory on the Deco tab and scroll from the top to the last row about one notch at a time. An item is counted only once it has been seen clearly, so a fast flick is never double counted: slots that went past too quickly show under "Not read yet" until you scroll back over them. The item pop-up hides whatever is under it, so rest the pointer on the bottom-right slot, or anywhere in the window that isn't an item. A soft tick means new rows were added. A double beep means the pop-up is hiding slots: slide the pointer aside for a second. A low beep means the scanner lost its place, and it will ask you to scroll back.</li>
           <li><b>Check.</b> Items are named from their icons as rows appear. Hover only the ones left unnamed, or any that look wrong: a hover always wins.</li>
           <li><b>Sync.</b> When the list looks right, sync. Copies are counted for you.</li>
         </ol>
@@ -457,10 +457,15 @@ function changed() {
 }
 function setStatus(t, live) { $("#statusText").textContent = t; $("#liveDot").classList.toggle("live", !!live); }
 const timeStr = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
+const agoStr = (h) => h < 1 / 60 ? "just now" : h < 1 ? Math.round(h * 60) + " min ago" : h < 48 ? Math.round(h) + (Math.round(h) === 1 ? " hour ago" : " hours ago") : Math.round(h / 24) + " days ago";
+// Cozy prices are read by hand, with no schedule, and each one stands for 18 hours before the tracker's
+// sale median takes over, so the top of the page says when that read was.
 function priceStatus() {
   if (!prices.asOf) return setStatus("No prices loaded yet", false);
   const age = (Date.now() - new Date(prices.asOf).getTime()) / 36e5;
-  setStatus("Prices as of " + timeStr(prices.asOf) + (prices.live ? " · tracker history live" : age > 30 ? " · may be out of date" : ""), !!prices.live || age <= 30);
+  if (!prices.cozy) return setStatus("Prices as of " + timeStr(prices.asOf) + (prices.live ? " · tracker history live" : age > 30 ? " · may be out of date" : ""), !!prices.live || age <= 30);
+  const cz = (Date.now() - new Date(prices.cozy).getTime()) / 36e5;
+  setStatus("Cozy prices read " + timeStr(prices.cozy) + " (" + agoStr(cz) + ")" + (cz > 18 ? " · over 18 hours old, so tracker prices are taking over" : ""), cz <= 18);
 }
 
 /* ---------- render ---------- */
@@ -667,8 +672,8 @@ async function loadData(first) {
   try {
     const get = (u) => fetch(u, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(u); return r.json(); });
     const [c, p] = await Promise.all([get("data/catalog.json"), get("data/prices.json")]);
-    catalog = c.items || {}; crates = c.crates || {}; prices = { asOf: p.asOf || null, items: p.items || {} };
-    priceStatus(); render();
+    catalog = c.items || {}; crates = c.crates || {}; prices = { asOf: p.asOf || null, cozy: p.cozy || Object.values(p.items || {}).reduce((a, x) => (x.t && x.t > a ? x.t : a), "") || null, tracker: p.tracker || null, items: p.items || {} };
+    priceStatus(); render(); if (!window.__ago) window.__ago = setInterval(priceStatus, 60000);   // keeps the "ago" in the header current
     liveTracker(); checkBuild();
   } catch (e) { if (first) setStatus("Couldn't load the price files. Reload to try again.", false); }
 }

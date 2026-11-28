@@ -43,6 +43,7 @@ def main(folder):
             q["p"] = p; q["t"] = stamp; q["l"] = int(listed); q["sd"] = int(sold)
             if tr != "—": q["tr"] = round(float(tr) / 100, 3)
     P["asOf"] = stamp
+    P["cozy"] = stamp          # when the Cozy lists were last read, shown at the top of the site
     P["source"] = "Cozy Market usual prices for crate items, read " + now.strftime("%Y-%m-%d %H:%M") + " UTC; tracker sale medians otherwise"
     json.dump(C, open("data/catalog.json", "w"), separators=(",", ":")); json.dump(P, open("data/prices.json", "w"), separators=(",", ":"))
     moves.sort()
